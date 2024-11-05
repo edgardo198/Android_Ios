@@ -16,12 +16,19 @@ class SignUpSerializer(serializers.ModelSerializer):
             }
         }
 
-    def create(self, validated_data):
-        username = validated_data['username'].lower()
-        first_name = validated_data['first_name'].lower()
-        last_name = validated_data['last_name'].lower()
+    def validate_username(self, value):
+        # Verifica si el nombre de usuario ya existe
+        if Usuario.objects.filter(username=value).exists():
+            raise serializers.ValidationError("Este nombre de usuario ya está en uso.")
+        return value
 
-        user = Usuario.objects.create(
+    def create(self, validated_data):
+        # Mantiene los datos tal como se ingresan sin forzar a minúsculas
+        username = validated_data['username']
+        first_name = validated_data['first_name']
+        last_name = validated_data['last_name']
+
+        user = Usuario(
             username=username,
             first_name=first_name,
             last_name=last_name
@@ -43,6 +50,7 @@ class UsuarioSerializer(serializers.ModelSerializer):
         ]
 
     def get_name(self, obj):
+        # Capitaliza el nombre y el apellido
         fname = obj.first_name.capitalize()
         lname = obj.last_name.capitalize()
         return f"{fname} {lname}"
