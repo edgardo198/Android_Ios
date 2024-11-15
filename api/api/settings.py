@@ -25,7 +25,8 @@ SECRET_KEY = 'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%
 DEBUG = True
 
 # Add your computer's local IP address here
-ALLOWED_HOSTS = ['192.168.1.39', '192.168.1.47', 'localhost']
+ALLOWED_HOSTS = ['192.168.1.39', 'localhost', '127.0.0.1']
+
 
 AUTH_USER_MODEL = 'chat.Usuario'
 
@@ -35,10 +36,24 @@ REST_FRAMEWORK = {
     )
 }
 
+ASGI_APPLICATION = 'api.asgi.application'
+
+#Channels
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [('127.0.0.1', 6379)],
+        },
+    },
+}
+
+
 # Application definition
 
 INSTALLED_APPS = [
-    'corsheaders',  # Add this line
+    'corsheaders',
+    'daphne',  
     'rest_framework',
     'rest_framework_simplejwt',
     'django.contrib.admin',
