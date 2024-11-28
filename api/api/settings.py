@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%
 DEBUG = True
 
 # Add your computer's local IP address here
-ALLOWED_HOSTS = ['192.168.1.39', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['192.168.1.41', 'localhost', '127.0.0.1']
 
 
 AUTH_USER_MODEL = 'chat.Usuario'
@@ -143,6 +143,10 @@ STATIC_URL = 'static/'
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = True  # Use only for testing purposes, restrict in production
 
+ 
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
