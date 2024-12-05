@@ -56,3 +56,15 @@ class UsuarioSerializer(serializers.ModelSerializer):
         return f"{fname} {lname}"
 
 
+class SearchSerializer(UsuarioSerializer):
+    status = serializers.SerializerMethodField()
+    class Meta:
+        model = Usuario
+        fields = [
+            'username',
+            'name',
+            'miniatura',
+            'status'
+        ]
+    def get_status(self, obj):
+        return 'no-connection'

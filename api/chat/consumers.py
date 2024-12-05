@@ -1,7 +1,9 @@
-from .serializers import UsuarioSerializer
+from .serializers import UsuarioSerializer, SearchSerializer
 from channels.generic.websocket import WebsocketConsumer
 from asgiref.sync import async_to_sync
 from django.core.files.base import ContentFile
+from django.db.models import Q
+from .models import Usuario
 import base64
 import json
 
@@ -29,8 +31,30 @@ class ChatConsumer(WebsocketConsumer):
         data_source = data.get('source')
         print('Received:', json.dumps(data, indent=2))
 
-        if data_source == 'miniatura':
+        if data_source == 'search':
+            self.recive_search(data)
+
+        elif data_source == 'miniatura':
             self.receive_miniatura(data)
+
+    def recive_search(self, data):
+        query = data.get('query')
+        users = Usuario.objects.filter( 
+            Q(username__istartswith=query) |
+            Q(first_name__istartswith=query) |
+            Q(last_name__istartswith=query) 
+        ).exclude(
+            username = self.username 
+        ).annotate(
+ #           pending_them=Exists(
+
+ #           )
+ #           pending_me=...
+ #           connected=...
+        )
+
+        serialized = SearchSerializer(users, many = True)
+        self.send_group(self.username, 'search', serialized.data)
 
     def receive_miniatura(self, data):
         user = self.scope['user']
