@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Usuario
+from .models import Usuario, Connection, Message
 
 class SignUpSerializer(serializers.ModelSerializer):
     class Meta:  
@@ -67,4 +67,75 @@ class SearchSerializer(UsuarioSerializer):
             'status'
         ]
     def get_status(self, obj):
+        if obj.pending_them:
+            return 'pending-them'
+        elif obj.pending_me:
+            return 'pending-me'
+        elif obj.connected:
+            return 'connected'
         return 'no-connection'
+
+class RequestSerializer(serializers.ModelSerializer):
+    sender = UsuarioSerializer()
+    receiver = UsuarioSerializer()
+
+    class Meta:
+       model = Connection
+       fields = [
+           'id',
+           'sender',
+           'receiver',
+           'created'
+       ]
+
+class FriendSerializer(serializers.ModelSerializer):
+    friend = serializers.SerializerMethodField()
+    preview = serializers.SerializerMethodField()
+    updated = serializers.SerializerMethodField()
+
+
+    class Meta:
+        model = Connection
+        fields = [
+            'id',
+            'friend',
+            'preview',
+            'updated'
+        ]  
+
+    def get_friend(self, obj):
+        if self.context['user'] == obj.sender:
+            return UsuarioSerializer(obj.receiver).data
+        elif self.context['user'] == obj.receiver:
+            return UsuarioSerializer(obj.sender).data
+        else:
+            print('Error: no se encontró friend para serializar')
+    
+    def get_preview(self, obj):
+        if not hasattr(obj, 'latest_text'):
+            return 'Nueva Connexion'
+        return obj.latest_text
+    
+    def get_updated(self, obj):
+        if not hasattr(obj, 'latest_created'):
+            date = obj.updated
+        else:
+            date=obj.latest_created or obj.updated
+        return date.isoformat()
+
+
+class MessageSerializer(serializers.ModelSerializer):
+    is_me = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Message
+        fields = [
+            'id',
+            'is_me',
+            'text',
+            'created'
+        ]
+
+    def get_is_me(self, obj):
+        return self.context['user'] == obj.user
+

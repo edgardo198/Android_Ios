@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%
 DEBUG = True
 
 # Add your computer's local IP address here
-ALLOWED_HOSTS = ['192.168.1.47', 'localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['192.168.1.41', 'localhost', '127.0.0.1', '192.168.1.61']
 
 
 AUTH_USER_MODEL = 'chat.Usuario'
