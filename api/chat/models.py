@@ -17,6 +17,8 @@ class Usuario(AbstractUser):
         blank=True
     )
 
+    pushToken = models.CharField(max_length=255, null=True, blank=True)
+
 class Connection(models.Model):
     sender = models.ForeignKey(
         Usuario, 
@@ -48,6 +50,13 @@ class Message (models.Model):
     )
     text=models.TextField()
     created = models.DateTimeField(auto_now_add=True)
-    
+
+    image = models.ImageField(upload_to='messages/images/', null=True, blank=True)
+    audio = models.FileField(upload_to='messages/audio/', null=True, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+
+    is_new = models.BooleanField(default=True)
     def __str__(self):
-        return self.user.username +': ' + self.text
+        return f"{self.user.username}: {self.text or 'Imagen/Audio'}"
+
+    

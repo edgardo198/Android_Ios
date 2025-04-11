@@ -42,5 +42,4 @@ class SignUpView(APIView):
         
         user_data = get_auth_for_user(user)
         return Response(user_data)
-        
 

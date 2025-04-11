@@ -8,35 +8,29 @@ class SignUpSerializer(serializers.ModelSerializer):
             'username',
             'first_name',
             'last_name',
-            'password'
+            'password',
+            'pushToken'
         ]
         extra_kwargs = {  
-            'password': {
-                'write_only': True
-            }
+            'password': {'write_only': True}
         }
 
     def validate_username(self, value):
-        # Verifica si el nombre de usuario ya existe
         if Usuario.objects.filter(username=value).exists():
             raise serializers.ValidationError("Este nombre de usuario ya está en uso.")
         return value
 
     def create(self, validated_data):
-        # Mantiene los datos tal como se ingresan sin forzar a minúsculas
-        username = validated_data['username']
-        first_name = validated_data['first_name']
-        last_name = validated_data['last_name']
-
         user = Usuario(
-            username=username,
-            first_name=first_name,
-            last_name=last_name
+            username=validated_data['username'],
+            first_name=validated_data['first_name'],
+            last_name=validated_data['last_name'],
+            pushToken=validated_data.get('pushToken')
         )
-        password = validated_data['password']
-        user.set_password(password)  # Encripta la contraseña
+        user.set_password(validated_data['password'])
         user.save()
         return user
+
 
 class UsuarioSerializer(serializers.ModelSerializer):
     name = serializers.SerializerMethodField()
@@ -46,26 +40,29 @@ class UsuarioSerializer(serializers.ModelSerializer):
         fields = [
             'username',
             'name',
-            'miniatura'
+            'miniatura',
+            'pushToken'
         ]
 
     def get_name(self, obj):
-        # Capitaliza el nombre y el apellido
-        fname = obj.first_name.capitalize()
-        lname = obj.last_name.capitalize()
-        return f"{fname} {lname}"
+        fname = obj.first_name.capitalize() if obj.first_name else ""
+        lname = obj.last_name.capitalize() if obj.last_name else ""
+        return f"{fname} {lname}".strip()
 
 
 class SearchSerializer(UsuarioSerializer):
     status = serializers.SerializerMethodField()
+    
     class Meta:
         model = Usuario
         fields = [
             'username',
             'name',
             'miniatura',
-            'status'
+            'status', 
+            'pushToken'
         ]
+    
     def get_status(self, obj):
         if obj.pending_them:
             return 'pending-them'
@@ -75,24 +72,26 @@ class SearchSerializer(UsuarioSerializer):
             return 'connected'
         return 'no-connection'
 
+
 class RequestSerializer(serializers.ModelSerializer):
     sender = UsuarioSerializer()
     receiver = UsuarioSerializer()
 
     class Meta:
-       model = Connection
-       fields = [
-           'id',
-           'sender',
-           'receiver',
-           'created'
-       ]
+        model = Connection
+        fields = [
+            'id',
+            'sender',
+            'receiver',
+            'created'
+        ]
+
 
 class FriendSerializer(serializers.ModelSerializer):
     friend = serializers.SerializerMethodField()
     preview = serializers.SerializerMethodField()
     updated = serializers.SerializerMethodField()
-
+    message = serializers.SerializerMethodField()
 
     class Meta:
         model = Connection
@@ -100,32 +99,35 @@ class FriendSerializer(serializers.ModelSerializer):
             'id',
             'friend',
             'preview',
-            'updated'
-        ]  
+            'updated',
+            'message'
+        ]
 
     def get_friend(self, obj):
-        if self.context['user'] == obj.sender:
-            return UsuarioSerializer(obj.receiver).data
-        elif self.context['user'] == obj.receiver:
-            return UsuarioSerializer(obj.sender).data
-        else:
-            print('Error: no se encontró friend para serializar')
-    
+        user = self.context.get('user')
+        if user == obj.sender:
+            return UsuarioSerializer(obj.receiver, context=self.context).data
+        elif user == obj.receiver:
+            return UsuarioSerializer(obj.sender, context=self.context).data
+        return None
+
     def get_preview(self, obj):
-        if not hasattr(obj, 'latest_text'):
-            return 'Nueva Connexion'
-        return obj.latest_text
-    
+        default = 'Nueva Connexion'
+        return getattr(obj, 'latest_text', default) or default
+
     def get_updated(self, obj):
-        if not hasattr(obj, 'latest_created'):
-            date = obj.updated
-        else:
-            date=obj.latest_created or obj.updated
-        return date.isoformat()
+        date = getattr(obj, 'latest_created', None) or obj.updated
+        return date.isoformat() if date else ''
+
+    def get_message(self, obj):
+        # Por defecto, sin mensaje nuevo; la lógica de actualización se maneja en el consumer.
+        return {"isNew": False}
 
 
 class MessageSerializer(serializers.ModelSerializer):
     is_me = serializers.SerializerMethodField()
+    type = serializers.SerializerMethodField()
+    isNew = serializers.BooleanField(source='is_new', read_only=True)
 
     class Meta:
         model = Message
@@ -133,9 +135,24 @@ class MessageSerializer(serializers.ModelSerializer):
             'id',
             'is_me',
             'text',
-            'created'
+            'image', 
+            'audio',  
+            'created',
+            'type',
+            'isNew'
         ]
 
     def get_is_me(self, obj):
-        return self.context['user'] == obj.user
+        return self.context.get('user') == obj.user
+
+    def get_type(self, obj):
+        if obj.image:
+            return 'image'
+        elif obj.audio:
+            return 'audio'
+        elif obj.text:
+            return 'text'
+        return 'unknown'
+
+
 
