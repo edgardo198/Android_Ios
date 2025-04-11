@@ -62,6 +62,10 @@ class ChatConsumer(WebsocketConsumer):
             self.receive_message_send_image(data)
         elif data_source == 'message.send_audio':
             self.receive_message_send_audio(data)
+        elif data_source == 'message.send_video':
+            self.receive_message_send_video(data)
+        elif data_source == 'message.send_document':
+            self.receive_message_send_document(data)
         elif data_source == 'message.type':
             self.receive_message_type(data)
         elif data_source == 'message.read':
@@ -108,8 +112,6 @@ class ChatConsumer(WebsocketConsumer):
         self.send_group(user.username, 'message.list', payload)
     
     def _build_message_payload(self, message, current_user, friend):
-    # NOTA: La actualización de is_new (marcar mensaje como leído) se debe hacer en otro punto,
-    # por ejemplo, cuando el receptor abra el chat, y no al construir el payload.
         serialized_message = MessageSerializer(message, context={'user': current_user})
         return {
             'message': serialized_message.data,
@@ -187,10 +189,14 @@ class ChatConsumer(WebsocketConsumer):
             message = Message.objects.create(
                 connection=connection,
                 user=user,
-                text='',
+                text='Imagen Recibida',
                 is_new=True
             )
             message.image.save(filename, content_file, save=True)
+            connection.latest_image = message.image.url
+            connection.latest_created = message.created
+            connection.latest_is_new = message.is_new
+            connection.save()
         except Exception as e:
             self.send(text_data=json.dumps({
                 'source': 'error',
@@ -198,15 +204,30 @@ class ChatConsumer(WebsocketConsumer):
             }))
             return
 
+        # Determinar el receptor: si el usuario es el sender, el receptor es el receiver, y viceversa.
         recipient = connection.sender if connection.sender != user else connection.receiver
-        serialized_message = MessageSerializer(message, context={'user': user})
         
-        payload = {
-            'message': serialized_message.data,
-            'friend': recipient.username
-        }
-        self.send_group(user.username, 'message.send', payload)
-        self.send_group(recipient.username, 'message.send', payload)
+        # Serializar el mensaje para el remitente y el receptor
+        serialized_message_sender = MessageSerializer(message, context={'user': user})
+        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
+        
+        # Serializar los amigos
+        serialized_friend_sender = UsuarioSerializer(recipient)
+        serialized_friend_recipient = UsuarioSerializer(user)
+
+        # Enviar al remitente
+        self.send_group(user.username, 'message.send', {
+            'message': serialized_message_sender.data,
+            'friend': serialized_friend_sender.data
+        })
+
+        if recipient.pushToken:
+            self.send_push_notification(recipient.pushToken, user.username, "Imagen")
+        
+        self.send_group(recipient.username, 'message.send', {
+            'message': serialized_message_recipient.data,
+            'friend': serialized_friend_recipient.data
+        })
 
     def receive_message_send_audio(self, data):
         """
@@ -230,10 +251,14 @@ class ChatConsumer(WebsocketConsumer):
             message = Message.objects.create(
                 connection=connection,
                 user=user,
-                text='',
+                text='Audio Recibido ',
                 is_new=True
             )
             message.audio.save(filename, content_file, save=True)
+            connection.latest_audio = message.audio.url
+            connection.latest_created = message.created
+            connection.latest_is_new = message.is_new
+            connection.save()
         except Exception as e:
             self.send(text_data=json.dumps({
                 'source': 'error',
@@ -242,13 +267,145 @@ class ChatConsumer(WebsocketConsumer):
             return
         
         recipient = connection.sender if connection.sender != user else connection.receiver
-        serialized_message = MessageSerializer(message, context={'user': user})
-        payload = {
-            'message': serialized_message.data,
-            'friend': recipient.username
-        }
-        self.send_group(user.username, 'message.send', payload)
-        self.send_group(recipient.username, 'message.send', payload)
+        
+        # Serializar el mensaje para ambos usuarios
+        serialized_message_sender = MessageSerializer(message, context={'user': user})
+        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
+
+        # Serializar los amigos
+        serialized_friend_sender = UsuarioSerializer(recipient)
+        serialized_friend_recipient = UsuarioSerializer(user)
+
+        # Enviar al remitente
+        self.send_group(user.username, 'message.send', {
+            'message': serialized_message_sender.data,
+            'friend': serialized_friend_sender.data
+        })
+
+        # Enviar notificación push
+        if recipient.pushToken:
+            self.send_push_notification(recipient.pushToken, user.username, "Audio")
+    
+        self.send_group(recipient.username, 'message.send', {
+            'message': serialized_message_recipient.data,
+            'friend': serialized_friend_recipient.data
+        })
+
+    def receive_message_send_video(self, data):
+        """
+        Procesa el envío de mensajes con video.
+        Se espera recibir el video en base64 y el nombre del archivo.
+        """
+        user = self.scope['user']
+        connection_id = data.get('connectionId')
+        base64_video = data.get('base64')
+        filename = data.get('filename')
+        if not base64_video or not filename:
+            self.send(text_data=json.dumps({
+                'source': 'error',
+                'message': 'Video o nombre de archivo inválido'
+            }))
+            return
+        try:
+            video_data = base64.b64decode(base64_video)
+            content_file = ContentFile(video_data, name=filename)
+            connection = Connection.objects.get(id=connection_id)
+            message = Message.objects.create(
+                connection=connection,
+                user=user,
+                text='Video Recibido',
+                is_new=True
+            )
+            message.video.save(filename, content_file, save=True)
+            connection.latest_video = message.video.url
+            connection.latest_created = message.created
+            connection.latest_is_new = message.is_new
+            connection.save()
+        except Exception as e:
+            self.send(text_data=json.dumps({
+                'source': 'error',
+                'message': f'Error al guardar el video: {str(e)}'
+            }))
+            return
+
+        recipient = connection.sender if connection.sender != user else connection.receiver
+        
+        serialized_message_sender = MessageSerializer(message, context={'user': user})
+        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
+        
+        serialized_friend_sender = UsuarioSerializer(recipient)
+        serialized_friend_recipient = UsuarioSerializer(user)
+
+        self.send_group(user.username, 'message.send', {
+            'message': serialized_message_sender.data,
+            'friend': serialized_friend_sender.data
+        })
+
+        if recipient.pushToken:
+            self.send_push_notification(recipient.pushToken, user.username, "Video")
+        
+        self.send_group(recipient.username, 'message.send', {
+            'message': serialized_message_recipient.data,
+            'friend': serialized_friend_recipient.data
+        })
+
+    def receive_message_send_document(self, data):
+        """
+        Procesa el envío de mensajes con documentos.
+        Se espera recibir el documento en base64 y el nombre del archivo.
+        """
+        user = self.scope['user']
+        connection_id = data.get('connectionId')
+        base64_doc = data.get('base64')
+        filename = data.get('filename')
+        if not base64_doc or not filename:
+            self.send(text_data=json.dumps({
+                'source': 'error',
+                'message': 'Documento o nombre de archivo inválido'
+            }))
+            return
+        try:
+            doc_data = base64.b64decode(base64_doc)
+            content_file = ContentFile(doc_data, name=filename)
+            connection = Connection.objects.get(id=connection_id)
+            message = Message.objects.create(
+                connection=connection,
+                user=user,
+                text='Documento Recibido',
+                is_new=True
+            )
+            message.document.save(filename, content_file, save=True)
+            connection.latest_document = message.document.url
+            connection.latest_created = message.created
+            connection.latest_is_new = message.is_new
+            connection.save()
+        except Exception as e:
+            self.send(text_data=json.dumps({
+                'source': 'error',
+                'message': f'Error al guardar el documento: {str(e)}'
+            }))
+            return
+
+        recipient = connection.sender if connection.sender != user else connection.receiver
+        
+        serialized_message_sender = MessageSerializer(message, context={'user': user})
+        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
+        
+        serialized_friend_sender = UsuarioSerializer(recipient)
+        serialized_friend_recipient = UsuarioSerializer(user)
+
+        self.send_group(user.username, 'message.send', {
+            'message': serialized_message_sender.data,
+            'friend': serialized_friend_sender.data
+        })
+
+        if recipient.pushToken:
+            self.send_push_notification(recipient.pushToken, user.username, "Documento")
+        
+        self.send_group(recipient.username, 'message.send', {
+            'message': serialized_message_recipient.data,
+            'friend': serialized_friend_recipient.data
+        })
     def receive_message_read(self, data):
         message_id = data.get('messageId')
         if not message_id:
@@ -262,9 +419,6 @@ class ChatConsumer(WebsocketConsumer):
             self.send_group(self.username, 'message.read', {'message': updated_payload})
             other = message.connection.sender if message.connection.sender != message.user else message.connection.receiver
             self.send_group(other.username, 'message.read', {'message': updated_payload})
-            # Aquí podrías emitir un evento o actualizar globalmente la friendList para reiniciar unreadCount.
-            # Por ejemplo, si tienes una función en tu global store:
-            # resetFriendUnreadCount(username_del_amigo)
         except Message.DoesNotExist:
             self.send(text_data=json.dumps({'source': 'error', 'message': 'Mensaje no encontrado'}))
 
@@ -480,7 +634,10 @@ class ChatConsumer(WebsocketConsumer):
             accepted=True
         ).annotate(
             latest_text=latest_message.values('text'),
+            latest_image=latest_message.values('image'),
+            latest_audio=latest_message.values('audio'),
             latest_created=latest_message.values('created'),
+            latest_is_new=latest_message.values('is_new'),
         ).order_by(
             Coalesce('latest_created', 'updated').desc()
         )

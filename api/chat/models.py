@@ -53,6 +53,8 @@ class Message (models.Model):
 
     image = models.ImageField(upload_to='messages/images/', null=True, blank=True)
     audio = models.FileField(upload_to='messages/audio/', null=True, blank=True)
+    video = models.FileField(upload_to='videos/', null=True, blank=True)
+    document = models.FileField(upload_to='documents/', null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
     is_new = models.BooleanField(default=True)

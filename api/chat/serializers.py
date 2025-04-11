@@ -105,6 +105,7 @@ class FriendSerializer(serializers.ModelSerializer):
 
     def get_friend(self, obj):
         user = self.context.get('user')
+        # Si el usuario actual es el sender, el amigo es el receiver, y viceversa.
         if user == obj.sender:
             return UsuarioSerializer(obj.receiver, context=self.context).data
         elif user == obj.receiver:
@@ -112,16 +113,62 @@ class FriendSerializer(serializers.ModelSerializer):
         return None
 
     def get_preview(self, obj):
-        default = 'Nueva Connexion'
-        return getattr(obj, 'latest_text', default) or default
+        if obj.latest_text:
+            return obj.latest_text
+        elif obj.latest_image:
+            return '[Imagen]'
+        elif obj.latest_audio:
+            return '[Audio]'
+        elif hasattr(obj, 'latest_video') and obj.latest_video:
+            return '[Video]'
+        elif hasattr(obj, 'latest_document') and obj.latest_document:
+            return '[Documento]'
+        return 'Nueva conexión'
 
     def get_updated(self, obj):
         date = getattr(obj, 'latest_created', None) or obj.updated
         return date.isoformat() if date else ''
 
     def get_message(self, obj):
-        # Por defecto, sin mensaje nuevo; la lógica de actualización se maneja en el consumer.
-        return {"isNew": False}
+        user = self.context.get('user')
+        is_me = user == obj.sender
+        if obj.latest_text:
+            return {
+                "type": "text",
+                "text": obj.latest_text,
+                "isNew": obj.latest_is_new,
+                "is_me": is_me
+            }
+        elif obj.latest_image:
+            return {
+                "type": "image",
+                "text": "[Imagen]",
+                "isNew": obj.latest_is_new,
+                "is_me": is_me
+            }
+        elif obj.latest_audio:
+            return {
+                "type": "audio",
+                "text": "[Audio]",
+                "isNew": obj.latest_is_new,
+                "is_me": is_me
+            }
+        elif hasattr(obj, 'latest_video') and obj.latest_video:
+            return {
+                "type": "video",
+                "text": "[Video]",
+                "isNew": obj.latest_is_new,
+                "is_me": is_me
+            }
+        elif hasattr(obj, 'latest_document') and obj.latest_document:
+            return {
+                "type": "document",
+                "text": "[Documento]",
+                "isNew": obj.latest_is_new,
+                "is_me": is_me
+            }
+        else:
+            return None
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -135,14 +182,17 @@ class MessageSerializer(serializers.ModelSerializer):
             'id',
             'is_me',
             'text',
-            'image', 
-            'audio',  
+            'image',
+            'audio',
+            'video',
+            'document',
             'created',
             'type',
             'isNew'
         ]
 
     def get_is_me(self, obj):
+        # Compara el usuario actual con el usuario asociado al mensaje.
         return self.context.get('user') == obj.user
 
     def get_type(self, obj):
@@ -150,6 +200,10 @@ class MessageSerializer(serializers.ModelSerializer):
             return 'image'
         elif obj.audio:
             return 'audio'
+        elif obj.video:
+            return 'video'
+        elif obj.document:
+            return 'document'
         elif obj.text:
             return 'text'
         return 'unknown'
