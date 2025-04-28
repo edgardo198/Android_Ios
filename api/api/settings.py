@@ -22,10 +22,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 # Add your computer's local IP address here
-ALLOWED_HOSTS = ['192.168.1.41', 'localhost', '127.0.0.1', '192.168.0.111']
+ALLOWED_HOSTS = ['192.168.1.41', 'localhost', '127.0.0.1', '192.168.0.111', 'Tato316.pythonanywhere.com',]
 
 
 AUTH_USER_MODEL = 'chat.Usuario'
@@ -141,7 +141,10 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 # CORS settings
-CORS_ALLOW_ALL_ORIGINS = True  # Use only for testing purposes, restrict in production
+#CORS_ALLOW_ALL_ORIGINS = True  # Use only for testing purposes, restrict in production
+CORS_ALLOWED_ORIGINS = [
+    'https://Tato316.pythonanywhere.com',
+]
 
  
 
