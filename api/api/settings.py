@@ -10,8 +10,8 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,11 +21,29 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
 
-# Add your computer's local IP address here
-ALLOWED_HOSTS = ['192.168.1.41', 'localhost', '127.0.0.1', '192.168.0.111',]
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+    return default
+
+
+# SECURITY WARNING: don't run with debug turned on in production!
+DEBUG = env_bool('DEBUG', True)
+
+allowed_hosts_env = os.getenv('ALLOWED_HOSTS')
+if allowed_hosts_env:
+    ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()]
+elif DEBUG:
+    ALLOWED_HOSTS = ['*']
+else:
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 
 AUTH_USER_MODEL = 'chat.Usuario'
@@ -38,15 +56,24 @@ REST_FRAMEWORK = {
 
 ASGI_APPLICATION = 'api.asgi.application'
 
-#Channels
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [('127.0.0.1', 6379)],
+# Channels
+redis_url = os.getenv('REDIS_URL')
+
+if redis_url:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [redis_url],
+            },
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 
 # Application definition

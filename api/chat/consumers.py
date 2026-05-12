@@ -1,830 +1,426 @@
 import json
-import base64
-import requests
-from channels.generic.websocket import WebsocketConsumer
+
 from asgiref.sync import async_to_sync
+from channels.generic.websocket import WebsocketConsumer
 from django.core.files.base import ContentFile
-from django.db.models import Q, Exists, OuterRef
+from django.db.models import Exists, OuterRef, Q
 from django.db.models.functions import Coalesce
 
+from .models import Connection, Message, Usuario
 from .serializers import (
-    UsuarioSerializer, 
-    SearchSerializer, 
-    RequestSerializer, 
-    FriendSerializer, 
-    MessageSerializer
+    FriendSerializer,
+    MessageSerializer,
+    RequestSerializer,
+    SearchSerializer,
+    UsuarioSerializer,
 )
-from .models import Usuario, Connection, Message
+from .services import (
+    ChatServiceError,
+    MEDIA_CONFIG,
+    build_message_payload,
+    content_file_from_base64,
+    create_media_message_from_file,
+    get_connection_for_user,
+    get_recipient,
+    send_group,
+    send_push_notification,
+)
+
 
 class ChatConsumer(WebsocketConsumer):
+    MESSAGE_PAGE_SIZE = 15
+
     def connect(self):
-        """Maneja la conexión inicial de WebSocket."""
-        user = self.scope['user']
+        user = self.scope["user"]
         if not user.is_authenticated:
             self.close()
             return
+
         self.username = user.username
-        async_to_sync(self.channel_layer.group_add)(
-            self.username, 
-            self.channel_name
-        )
+        async_to_sync(self.channel_layer.group_add)(self.username, self.channel_name)
         self.accept()
 
     def disconnect(self, close_code):
-        """Maneja la desconexión del WebSocket."""
-        if hasattr(self, 'username'):
-            async_to_sync(self.channel_layer.group_discard)(
-                self.username, 
-                self.channel_name
-            )
+        if hasattr(self, "username"):
+            async_to_sync(self.channel_layer.group_discard)(self.username, self.channel_name)
 
     def receive(self, text_data):
-        """Recibe mensajes de WebSocket y los redirige según la fuente."""
         try:
             data = json.loads(text_data)
         except json.JSONDecodeError:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Invalid JSON format.'
-            }))
+            self._send_error("Invalid JSON format.")
             return
-        
-        data_source = data.get('source')
-        print('Receive:', json.dumps(data, indent=2))
 
-        if data_source == 'friend.list':
-            self.receive_friend_list(data)
-        elif data_source == 'message.list':
-            self.receive_message_list(data)
-        elif data_source == 'message.send':
-            self.receive_message_send(data)
-        elif data_source == 'message.send_image':
-            self.receive_message_send_image(data)
-        elif data_source == 'message.send_audio':
-            self.receive_message_send_audio(data)
-        elif data_source == 'message.send_video':
-            self.receive_message_send_video(data)
-        elif data_source == 'message.send_document':
-            self.receive_message_send_document(data)
-        elif data_source == 'message.type':
-            self.receive_message_type(data)
-        elif data_source == 'message.read':
-            self.receive_message_read(data)
-        elif data_source == 'request.accept':
-            self.receive_request_accept(data)
-        elif data_source == 'request.connect':
-            self.receive_request_connect(data)
-        elif data_source == 'request.list':
-            self.receive_request_list(data)
-        elif data_source == 'search':
-            self.receive_search(data)
-        elif data_source == 'miniatura':
-            self.receive_miniatura(data)
-        # Puedes agregar más "source" según se requiera.
+        handlers = {
+            "friend.list": self.receive_friend_list,
+            "message.list": self.receive_message_list,
+            "message.send": self.receive_message_send,
+            "message.send_image": self.receive_message_send_image,
+            "message.send_audio": self.receive_message_send_audio,
+            "message.send_video": self.receive_message_send_video,
+            "message.send_document": self.receive_message_send_document,
+            "message.type": self.receive_message_type,
+            "message.read": self.receive_message_read,
+            "request.accept": self.receive_request_accept,
+            "request.connect": self.receive_request_connect,
+            "request.list": self.receive_request_list,
+            "search": self.receive_search,
+            "miniatura": self.receive_miniatura,
+        }
+
+        handler = handlers.get(data.get("source"))
+        if not handler:
+            self._send_error("Fuente no soportada.")
+            return
+
+        handler(data)
+
+    def _send_error(self, message):
+        self.send(
+            text_data=json.dumps(
+                {
+                    "source": "error",
+                    "message": message,
+                }
+            )
+        )
+
+    def _get_user(self):
+        return self.scope["user"]
+
+    def _get_connection(self, connection_id, *, require_accepted=False):
+        try:
+            return get_connection_for_user(
+                self._get_user(),
+                connection_id,
+                require_accepted=require_accepted,
+            )
+        except ChatServiceError as error:
+            self._send_error(error.message)
+            return None
+
+    def _get_recipient(self, connection, user):
+        return get_recipient(connection, user)
+
+    def _normalize_page(self, raw_page):
+        try:
+            page = int(raw_page or 0)
+        except (TypeError, ValueError):
+            self._send_error("Pagina invalida.")
+            return None
+
+        if page < 0:
+            self._send_error("Pagina invalida.")
+            return None
+
+        return page
+
+    def _extract_base64(self, raw_value):
+        if not raw_value:
+            return None
+        return raw_value.split(",", 1)[1] if "," in raw_value else raw_value
+
+    def _build_message_payload(self, message, current_user, friend):
+        return build_message_payload(message, current_user, friend)
+
+    def _broadcast_message(self, message, sender, recipient, push_body=None):
+        self.send_group(
+            sender.username,
+            "message.send",
+            self._build_message_payload(message, sender, recipient),
+        )
+
+        if push_body and recipient.pushToken:
+            self.send_push_notification(recipient.pushToken, sender.username, push_body)
+
+        self.send_group(
+            recipient.username,
+            "message.send",
+            self._build_message_payload(message, recipient, sender),
+        )
+
+    def _create_media_message(self, data, media_type):
+        user = self._get_user()
+        connection = self._get_connection(data.get("connectionId"), require_accepted=True)
+        if not connection:
+            return
+
+        base64_value = data.get("base64")
+        filename = data.get("filename")
+
+        try:
+            file_obj = content_file_from_base64(base64_value, filename)
+            message, recipient = create_media_message_from_file(
+                user,
+                connection,
+                file_obj,
+                media_type,
+                broadcast=False,
+            )
+            self._broadcast_message(message, user, recipient, MEDIA_CONFIG[media_type]["push"])
+        except ChatServiceError as error:
+            self._send_error(error.message)
+            return
 
     def receive_message_list(self, data):
-        user = self.scope['user']
-        connectionId = data.get('connectionId')
-        page = data.get('page')
-        page_size = 15 
-        try:
-            connection = Connection.objects.get(id=connectionId)
-        except Connection.DoesNotExist:
-            print('Error: no se pudo encontrar la conexión')
+        user = self._get_user()
+        connection = self._get_connection(data.get("connectionId"), require_accepted=True)
+        if not connection:
             return
-        messages = Message.objects.filter(connection=connection).order_by('-created')[
-            page * page_size:(page + 1) * page_size
-        ]
-        serialized_messages = MessageSerializer(
-            messages,
-            context={'user': user},
-            many=True
-        )
-        recipient = connection.sender if connection.sender != user else connection.receiver
-        serialized_friend = UsuarioSerializer(recipient)
-        messages_count = Message.objects.filter(connection=connection).count()
-        next_page = page + 1 if messages_count > (page + 1) * page_size else None
+
+        page = self._normalize_page(data.get("page"))
+        if page is None:
+            return
+
+        start = page * self.MESSAGE_PAGE_SIZE
+        end = start + self.MESSAGE_PAGE_SIZE
+        messages_qs = Message.objects.filter(connection=connection).order_by("-created")
+        messages = messages_qs[start:end]
+        messages_count = messages_qs.count()
+        next_page = page + 1 if messages_count > end else None
+        recipient = self._get_recipient(connection, user)
+
         payload = {
-            'messages': serialized_messages.data,
-            'next': next_page,
-            'friend': serialized_friend.data
+            "messages": MessageSerializer(messages, context={"user": user}, many=True).data,
+            "next": next_page,
+            "friend": UsuarioSerializer(recipient).data,
         }
-        self.send_group(user.username, 'message.list', payload)
-    
-    def _build_message_payload(self, message, current_user, friend):
-        serialized_message = MessageSerializer(message, context={'user': current_user})
-        return {
-            'message': serialized_message.data,
-            'friend': UsuarioSerializer(friend).data
-        }
+        self.send_group(user.username, "message.list", payload)
 
     def receive_message_send(self, data):
-        """Procesa el envío de mensajes de texto."""
-        user = self.scope['user']
-        connection_id = data.get('connectionId')
-        message_text = data.get('message')
-    
-        # Buscar la conexión
-        try:
-            connection = Connection.objects.get(id=connection_id)
-        except Connection.DoesNotExist:
-            print('Error: no se pudo encontrar la conexión')
+        user = self._get_user()
+        connection = self._get_connection(data.get("connectionId"), require_accepted=True)
+        if not connection:
             return
 
-        # Determinar el receptor: si el usuario es el sender, el receptor es el receiver, y viceversa.
-        recipient = connection.sender if connection.sender != user else connection.receiver
+        message_text = (data.get("message") or "").strip()
+        if not message_text:
+            self._send_error("El mensaje no puede estar vacio.")
+            return
 
-        # Crear el mensaje marcándolo como nuevo
         message = Message.objects.create(
             connection=connection,
             user=user,
             text=message_text,
-            is_new=True
+            is_new=True,
         )
 
-        # Serializar el mensaje para el emisor y para el receptor
-        serialized_message_for_sender = MessageSerializer(message, context={'user': user})
-        serialized_message_for_recipient = MessageSerializer(message, context={'user': recipient})
-    
-        # Serializar la información del amigo. Para el emisor, el "friend" es el receptor, y viceversa.
-        serialized_friend_for_sender = UsuarioSerializer(recipient)
-        serialized_friend_for_recipient = UsuarioSerializer(user)
-
-        # Enviar el mensaje al emisor
-        self.send_group(user.username, 'message.send', {
-            'message': serialized_message_for_sender.data,
-            'friend': serialized_friend_for_sender.data
-        })
-
-        # Enviar notificación push (solo una vez al receptor)
-        if recipient.pushToken:
-            self.send_push_notification(recipient.pushToken, user.username, message_text)
-
-        # Enviar el mensaje al receptor
-        self.send_group(recipient.username, 'message.send', {
-            'message': serialized_message_for_recipient.data,
-            'friend': serialized_friend_for_recipient.data
-        })
-
+        recipient = self._get_recipient(connection, user)
+        self._broadcast_message(message, user, recipient, message_text)
 
     def receive_message_send_image(self, data):
-        """
-        Procesa el envío de mensajes con imagen.
-        Se espera recibir la imagen en base64 y el nombre del archivo.
-        """
-        user = self.scope['user']
-        connection_id = data.get('connectionId')
-        base64_image = data.get('base64')
-        filename = data.get('filename')
-        if not base64_image or not filename:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Imagen o nombre de archivo inválido'
-            }))
-            return
-        try:
-            image_data = base64.b64decode(base64_image)
-            content_file = ContentFile(image_data, name=filename)
-            connection = Connection.objects.get(id=connection_id)
-            message = Message.objects.create(
-                connection=connection,
-                user=user,
-                text='Imagen Recibida',
-                is_new=True
-            )
-            message.image.save(filename, content_file, save=True)
-            connection.latest_image = message.image.url
-            connection.latest_created = message.created
-            connection.latest_is_new = message.is_new
-            connection.save()
-        except Exception as e:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': f'Error al guardar la imagen: {str(e)}'
-            }))
-            return
-
-        # Determinar el receptor: si el usuario es el sender, el receptor es el receiver, y viceversa.
-        recipient = connection.sender if connection.sender != user else connection.receiver
-        
-        # Serializar el mensaje para el remitente y el receptor
-        serialized_message_sender = MessageSerializer(message, context={'user': user})
-        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
-        
-        # Serializar los amigos
-        serialized_friend_sender = UsuarioSerializer(recipient)
-        serialized_friend_recipient = UsuarioSerializer(user)
-
-        # Enviar al remitente
-        self.send_group(user.username, 'message.send', {
-            'message': serialized_message_sender.data,
-            'friend': serialized_friend_sender.data
-        })
-
-        if recipient.pushToken:
-            self.send_push_notification(recipient.pushToken, user.username, "Imagen")
-        
-        self.send_group(recipient.username, 'message.send', {
-            'message': serialized_message_recipient.data,
-            'friend': serialized_friend_recipient.data
-        })
+        self._create_media_message(data, "image")
 
     def receive_message_send_audio(self, data):
-        """
-        Procesa el envío de mensajes con audio.
-        Se espera recibir el audio en base64 y el nombre del archivo.
-        """
-        user = self.scope['user']
-        connection_id = data.get('connectionId')
-        base64_audio = data.get('base64')
-        filename = data.get('filename')
-        if not base64_audio or not filename:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Audio o nombre de archivo inválido'
-            }))
-            return
-        try:
-            audio_data = base64.b64decode(base64_audio)
-            content_file = ContentFile(audio_data, name=filename)
-            connection = Connection.objects.get(id=connection_id)
-            message = Message.objects.create(
-                connection=connection,
-                user=user,
-                text='Audio Recibido ',
-                is_new=True
-            )
-            message.audio.save(filename, content_file, save=True)
-            connection.latest_audio = message.audio.url
-            connection.latest_created = message.created
-            connection.latest_is_new = message.is_new
-            connection.save()
-        except Exception as e:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': f'Error al guardar el audio: {str(e)}'
-            }))
-            return
-        
-        recipient = connection.sender if connection.sender != user else connection.receiver
-        
-        # Serializar el mensaje para ambos usuarios
-        serialized_message_sender = MessageSerializer(message, context={'user': user})
-        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
-
-        # Serializar los amigos
-        serialized_friend_sender = UsuarioSerializer(recipient)
-        serialized_friend_recipient = UsuarioSerializer(user)
-
-        # Enviar al remitente
-        self.send_group(user.username, 'message.send', {
-            'message': serialized_message_sender.data,
-            'friend': serialized_friend_sender.data
-        })
-
-        # Enviar notificación push
-        if recipient.pushToken:
-            self.send_push_notification(recipient.pushToken, user.username, "Audio")
-    
-        self.send_group(recipient.username, 'message.send', {
-            'message': serialized_message_recipient.data,
-            'friend': serialized_friend_recipient.data
-        })
+        self._create_media_message(data, "audio")
 
     def receive_message_send_video(self, data):
-        """
-        Procesa el envío de mensajes con video.
-        Se espera recibir el video en base64 y el nombre del archivo.
-        """
-        user = self.scope['user']
-        connection_id = data.get('connectionId')
-        base64_video = data.get('base64')
-        filename = data.get('filename')
-        if not base64_video or not filename:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Video o nombre de archivo inválido'
-            }))
-            return
-        try:
-            video_data = base64.b64decode(base64_video)
-            content_file = ContentFile(video_data, name=filename)
-            connection = Connection.objects.get(id=connection_id)
-            message = Message.objects.create(
-                connection=connection,
-                user=user,
-                text='Video Recibido',
-                is_new=True
-            )
-            message.video.save(filename, content_file, save=True)
-            connection.latest_video = message.video.url
-            connection.latest_created = message.created
-            connection.latest_is_new = message.is_new
-            connection.save()
-        except Exception as e:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': f'Error al guardar el video: {str(e)}'
-            }))
-            return
-
-        recipient = connection.sender if connection.sender != user else connection.receiver
-        
-        serialized_message_sender = MessageSerializer(message, context={'user': user})
-        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
-        
-        serialized_friend_sender = UsuarioSerializer(recipient)
-        serialized_friend_recipient = UsuarioSerializer(user)
-
-        self.send_group(user.username, 'message.send', {
-            'message': serialized_message_sender.data,
-            'friend': serialized_friend_sender.data
-        })
-
-        if recipient.pushToken:
-            self.send_push_notification(recipient.pushToken, user.username, "Video")
-        
-        self.send_group(recipient.username, 'message.send', {
-            'message': serialized_message_recipient.data,
-            'friend': serialized_friend_recipient.data
-        })
+        self._create_media_message(data, "video")
 
     def receive_message_send_document(self, data):
-        """
-        Procesa el envío de mensajes con documentos.
-        Se espera recibir el documento en base64 y el nombre del archivo.
-        """
-        user = self.scope['user']
-        connection_id = data.get('connectionId')
-        base64_doc = data.get('base64')
-        filename = data.get('filename')
-        if not base64_doc or not filename:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Documento o nombre de archivo inválido'
-            }))
-            return
-        try:
-            doc_data = base64.b64decode(base64_doc)
-            content_file = ContentFile(doc_data, name=filename)
-            connection = Connection.objects.get(id=connection_id)
-            message = Message.objects.create(
-                connection=connection,
-                user=user,
-                text='Documento Recibido',
-                is_new=True
-            )
-            message.document.save(filename, content_file, save=True)
-            connection.latest_document = message.document.url
-            connection.latest_created = message.created
-            connection.latest_is_new = message.is_new
-            connection.save()
-        except Exception as e:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': f'Error al guardar el documento: {str(e)}'
-            }))
-            return
+        self._create_media_message(data, "document")
 
-        recipient = connection.sender if connection.sender != user else connection.receiver
-        
-        serialized_message_sender = MessageSerializer(message, context={'user': user})
-        serialized_message_recipient = MessageSerializer(message, context={'user': recipient})
-        
-        serialized_friend_sender = UsuarioSerializer(recipient)
-        serialized_friend_recipient = UsuarioSerializer(user)
-
-        self.send_group(user.username, 'message.send', {
-            'message': serialized_message_sender.data,
-            'friend': serialized_friend_sender.data
-        })
-
-        if recipient.pushToken:
-            self.send_push_notification(recipient.pushToken, user.username, "Documento")
-        
-        self.send_group(recipient.username, 'message.send', {
-            'message': serialized_message_recipient.data,
-            'friend': serialized_friend_recipient.data
-        })
     def receive_message_read(self, data):
-        message_id = data.get('messageId')
+        user = self._get_user()
+        message_id = data.get("messageId")
         if not message_id:
-            self.send(text_data=json.dumps({'source': 'error', 'message': 'No se proporcionó messageId'}))
+            self._send_error("No se proporciono messageId.")
             return
+
         try:
-            message = Message.objects.get(id=message_id)
-            message.is_new = False
-            message.save()
-            updated_payload = MessageSerializer(message, context={'user': self.scope['user']}).data
-            self.send_group(self.username, 'message.read', {'message': updated_payload})
-            other = message.connection.sender if message.connection.sender != message.user else message.connection.receiver
-            self.send_group(other.username, 'message.read', {'message': updated_payload})
+            message = Message.objects.select_related("connection", "user").get(id=message_id)
         except Message.DoesNotExist:
-            self.send(text_data=json.dumps({'source': 'error', 'message': 'Mensaje no encontrado'}))
-
-
-    def receive_message_type(self, data):
-        """Maneja eventos de tipeo (typing)."""
-        user = self.scope['user']
-        recipient_username = data.get('username')
-        payload = {'username': user.username}
-        self.send_group(recipient_username, 'message.type', payload)
-
-    def receive_request_accept(self, data):
-        username = data.get('username')
-        try:
-            connection = Connection.objects.get(
-                sender__username=username,
-                receiver=self.scope['user']
-            )
-        except Connection.DoesNotExist:
-            print('Error: Conexión no existe')
-            return
-        connection.accepted = True
-        connection.save()
-
-        serialized = RequestSerializer(connection)
-        self.send_group(connection.sender.username, 'request.accept', serialized.data)
-        self.send_group(connection.receiver.username, 'request.accept', serialized.data)
-
-        serialized_friend = FriendSerializer(connection, context={'user': connection.sender})
-        self.send_group(connection.sender.username, 'friend.new', serialized_friend.data)
-        serialized_friend = FriendSerializer(connection, context={'user': connection.receiver})
-        self.send_group(connection.receiver.username, 'friend.new', serialized_friend.data)
-
-    def receive_request_connect(self, data):
-        """Maneja la solicitud de conexión entre usuarios."""
-        username = data.get('username')
-        try:
-            receiver = Usuario.objects.get(username=username)
-        except Usuario.DoesNotExist:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Usuario no encontrado.'
-            }))
+            self._send_error("Mensaje no encontrado.")
             return
 
-        connection, _ = Connection.objects.get_or_create(
-            sender=self.scope['user'],
-            receiver=receiver
+        connection = message.connection
+        if connection.sender_id != user.id and connection.receiver_id != user.id:
+            self._send_error("No tienes acceso a este mensaje.")
+            return
+
+        message.is_new = False
+        message.save(update_fields=["is_new"])
+
+        recipient = self._get_recipient(connection, user)
+        self.send_group(
+            user.username,
+            "message.read",
+            {"message": MessageSerializer(message, context={"user": user}).data},
         )
-        serialized = RequestSerializer(connection)
-        self.send_group(connection.sender.username, 'request.connect', serialized.data)
-        self.send_group(connection.receiver.username, 'request.connect', serialized.data)
-
-    def receive_request_list(self, data):
-        """Maneja la lista de solicitudes de conexión."""
-        user = self.scope['user']
-        connections = Connection.objects.filter(receiver=user, accepted=False)
-        serialized = RequestSerializer(connections, many=True)
-        self.send_group(user.username, 'request.list', serialized.data)
-
-    def receive_search(self, data):
-        """Maneja la búsqueda de usuarios."""
-        query = data.get('query', '')
-        if not query:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'La consulta de búsqueda está vacía.'
-            }))
-            return
-
-        users = Usuario.objects.filter(
-            Q(username__istartswith=query) |
-            Q(first_name__istartswith=query) |
-            Q(last_name__istartswith=query)
-        ).exclude(
-            username=self.username
-        ).annotate(
-            pending_them=Exists(
-                Connection.objects.filter(
-                    sender=self.scope['user'],
-                    receiver=OuterRef('id'),
-                    accepted=False
-                )
-            ),
-            pending_me=Exists(
-                Connection.objects.filter(
-                    sender=OuterRef('id'),
-                    receiver=self.scope['user'],
-                    accepted=False
-                )
-            ),
-            connected=Exists(
-                Connection.objects.filter(
-                    Q(sender=self.scope['user'], receiver=OuterRef('id')) |
-                    Q(receiver=self.scope['user'], sender=OuterRef('id')),
-                    accepted=True
-                )
-            )
+        self.send_group(
+            recipient.username,
+            "message.read",
+            {"message": MessageSerializer(message, context={"user": recipient}).data},
         )
-
-        serialized = SearchSerializer(users, many=True)
-        self.send_group(self.username, 'search', serialized.data)
-        """Maneja la búsqueda de usuarios."""
-        query = data.get('query', '')
-        if not query:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'La consulta de búsqueda está vacía.'
-            }))
-            return
-
-        users = Usuario.objects.filter(
-            Q(username__istartswith=query) |
-            Q(first_name__istartswith=query) |
-            Q(last_name__istartswith=query)
-        ).exclude(username=self.username).annotate(
-            pending_them=Exists(
-                Connection.objects.filter(
-                    sender=self.scope['user'],
-                    receiver=OuterRef('id'),
-                    accepted=False
-                )
-            ),
-            pending_me=Exists(
-                Connection.objects.filter(
-                    sender=OuterRef('id'),
-                    receiver=self.scope['user'],
-                    accepted=False
-                )
-            ),
-            connected=Exists(
-                Connection.objects.filter(
-                    Q(sender=self.scope['user'], receiver=OuterRef('id')) |
-                    Q(receiver=self.scope['user'], sender=OuterRef('id')),
-                    accepted=True
-                )
-            )
-        )
-        serialized = SearchSerializer(users, many=True)
-        self.send_group(self.username, 'search', serialized.data)
-
-    def receive_miniatura(self, data):
-        """Maneja la carga de miniaturas de usuario."""
-        user = self.scope['user']
-        image_str = data.get('base64')
-        filename = data.get('filename')
-        if not image_str or not filename:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Imagen o nombre de archivo inválidos.'
-            }))
-            return
-        try:
-            image = ContentFile(base64.b64decode(image_str))
-            user.miniatura.save(filename, image, save=True)
-        except Exception as e:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': f'Error al guardar la imagen: {str(e)}'
-            }))
-            return
-        serialized = UsuarioSerializer(user)
-        self.send_group(self.username, 'miniatura', serialized.data)
-
-    def send_group(self, group, source, data):
-        """Envía un mensaje a un grupo de canales."""
-        response = {
-            'type': 'broadcast_group',
-            'source': source,
-            'data': data
-        }
-        async_to_sync(self.channel_layer.group_send)(group, response)
-
-    def broadcast_group(self, event):
-        """Envía mensajes de forma global a través de broadcast."""
-        data = {
-            'source': event.get('source'),
-            'data': event.get('data')
-        }
-        self.send(text_data=json.dumps(data))
-
-    def send_push_notification(self, push_token, title, message):
-        """Envía una notificación push utilizando la API de Expo."""
-        expo_url = "https://exp.host/--/api/v2/push/send"
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "to": push_token,
-            "sound": "default",
-            "title": title,
-            "body": message
-        }
-        try:
-            response = requests.post(expo_url, json=payload, headers=headers)
-            response.raise_for_status()
-            print(f"Notificación enviada: {response.json()}")
-        except requests.exceptions.RequestException as e:
-            print(f"Error enviando la notificación: {e}")
-
-
 
     def receive_friend_list(self, data):
-        user = self.scope['user']
-        #mensaje sub query
-        latest_message = Message.objects.filter(
-            connection=OuterRef('id')
-        ).order_by('-created')[:1]
-        #conexion con el usuario 
+        user = self._get_user()
+        latest_message = Message.objects.filter(connection=OuterRef("id")).order_by("-created")[:1]
         connections = Connection.objects.filter(
-            Q(sender=user) | Q(receiver = user),
-            accepted=True
+            Q(sender=user) | Q(receiver=user),
+            accepted=True,
         ).annotate(
-            latest_text=latest_message.values('text'),
-            latest_image=latest_message.values('image'),
-            latest_audio=latest_message.values('audio'),
-            latest_created=latest_message.values('created'),
-            latest_is_new=latest_message.values('is_new'),
-        ).order_by(
-            Coalesce('latest_created', 'updated').desc()
-        )
+            latest_text=latest_message.values("text"),
+            latest_image=latest_message.values("image"),
+            latest_audio=latest_message.values("audio"),
+            latest_video=latest_message.values("video"),
+            latest_document=latest_message.values("document"),
+            latest_created=latest_message.values("created"),
+            latest_is_new=latest_message.values("is_new"),
+            latest_user_id=latest_message.values("user_id"),
+        ).order_by(Coalesce("latest_created", "updated").desc())
 
-        serialized = FriendSerializer(
-            connections,
-            context = {'user': user},
-            many = True
-            )
-        self.send_group( 
-            user.username, 'friend.list', serialized.data 
-            )
-    
+        serialized = FriendSerializer(connections, context={"user": user}, many=True)
+        self.send_group(user.username, "friend.list", serialized.data)
+
     def receive_message_type(self, data):
-        user = self.scope['user']
-        recipient_username = data.get('username')
-        data = {
-			'username': user.username
-		}
-        self.send_group(recipient_username, 'message.type', data)
+        recipient_username = data.get("username")
+        if not recipient_username:
+            self._send_error("No se proporciono username.")
+            return
+
+        user = self._get_user()
+        self.send_group(
+            recipient_username,
+            "message.type",
+            {"username": user.username},
+        )
 
     def receive_request_accept(self, data):
-        username = data.get('username')
+        user = self._get_user()
+        username = data.get("username")
+        if not username:
+            self._send_error("No se proporciono username.")
+            return
+
         try:
-            connection = Connection.objects.get(
+            connection = Connection.objects.select_related("sender", "receiver").get(
                 sender__username=username,
-                receiver = self.scope['user']
+                receiver=user,
             )
         except Connection.DoesNotExist:
-            print('rror: Conexion no existe')
+            self._send_error("La solicitud de conexion no existe.")
             return
+
         connection.accepted = True
-        connection.save()
+        connection.save(update_fields=["accepted", "updated"])
 
-        serialized = RequestSerializer(connection)
-        self.send_group(
-            connection.sender.username, 'request.accept', serialized.data
-        )
-
-        self.send_group(
-            connection.receiver.username, 'request.accept', serialized.data
-        )
-
-        serialized_friend = FriendSerializer(
-            connection, 
-            context={
-                'user': connection.sender 
-            }
-        )
+        serialized_request = RequestSerializer(connection)
+        self.send_group(connection.sender.username, "request.accept", serialized_request.data)
+        self.send_group(connection.receiver.username, "request.accept", serialized_request.data)
 
         self.send_group(
-            connection.sender.username, 'friend.new', serialized_friend.data
+            connection.sender.username,
+            "friend.new",
+            FriendSerializer(connection, context={"user": connection.sender}).data,
         )
-
-        serialized_friend = FriendSerializer(
-            connection, 
-            context={
-                'user': connection.receiver 
-            }
-        )
-
         self.send_group(
-            connection.receiver.username, 'friend.new', serialized_friend.data
+            connection.receiver.username,
+            "friend.new",
+            FriendSerializer(connection, context={"user": connection.receiver}).data,
         )
 
     def receive_request_connect(self, data):
-        """Maneja la solicitud de conexión entre usuarios."""
-        username = data.get('username')
+        user = self._get_user()
+        username = data.get("username")
+        if not username:
+            self._send_error("No se proporciono username.")
+            return
+
+        if username == user.username:
+            self._send_error("No puedes enviarte una solicitud a ti mismo.")
+            return
+
         try:
             receiver = Usuario.objects.get(username=username)
         except Usuario.DoesNotExist:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Usuario no encontrado.'
-            }))
+            self._send_error("Usuario no encontrado.")
             return
 
-        connection, _ = Connection.objects.get_or_create(
-            sender=self.scope['user'],
-            receiver=receiver
-        )
-
+        connection, _ = Connection.objects.get_or_create(sender=user, receiver=receiver)
         serialized = RequestSerializer(connection)
 
-        self.send_group(
-            connection.sender.username, 
-            'request.connect', 
-            serialized.data
-        )
-        self.send_group(
-            connection.receiver.username, 
-            'request.connect', 
-            serialized.data
-        )
+        self.send_group(connection.sender.username, "request.connect", serialized.data)
+        self.send_group(connection.receiver.username, "request.connect", serialized.data)
 
     def receive_request_list(self, data):
-        """Maneja la lista de solicitudes de conexión."""
-        user = self.scope['user']
-        connections = Connection.objects.filter(
-            receiver=user,
-            accepted=False
-        )
+        user = self._get_user()
+        connections = Connection.objects.filter(receiver=user, accepted=False)
         serialized = RequestSerializer(connections, many=True)
-        self.send_group(user.username, 'request.list', serialized.data)
+        self.send_group(user.username, "request.list", serialized.data)
 
     def receive_search(self, data):
-        """Maneja la búsqueda de usuarios."""
-        query = data.get('query', '')
+        user = self._get_user()
+        query = (data.get("query") or "").strip()
         if not query:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'La consulta de búsqueda está vacía.'
-            }))
+            self.send_group(user.username, "search", [])
             return
 
         users = Usuario.objects.filter(
-            Q(username__istartswith=query) |
-            Q(first_name__istartswith=query) |
-            Q(last_name__istartswith=query)
-        ).exclude(
-            username=self.username
-        ).annotate(
+            Q(username__istartswith=query)
+            | Q(first_name__istartswith=query)
+            | Q(last_name__istartswith=query)
+        ).exclude(username=user.username).annotate(
             pending_them=Exists(
                 Connection.objects.filter(
-                    sender=self.scope['user'],
-                    receiver=OuterRef('id'),
-                    accepted=False
+                    sender=user,
+                    receiver=OuterRef("id"),
+                    accepted=False,
                 )
             ),
             pending_me=Exists(
                 Connection.objects.filter(
-                    sender=OuterRef('id'),
-                    receiver=self.scope['user'],
-                    accepted=False
+                    sender=OuterRef("id"),
+                    receiver=user,
+                    accepted=False,
                 )
             ),
             connected=Exists(
                 Connection.objects.filter(
-                    Q(sender=self.scope['user'], receiver=OuterRef('id')) |
-                    Q(receiver=self.scope['user'], sender=OuterRef('id')),
-                    accepted=True
+                    Q(sender=user, receiver=OuterRef("id"))
+                    | Q(receiver=user, sender=OuterRef("id")),
+                    accepted=True,
                 )
-            )
+            ),
         )
 
         serialized = SearchSerializer(users, many=True)
-        self.send_group(self.username, 'search', serialized.data)
+        self.send_group(user.username, "search", serialized.data)
 
     def receive_miniatura(self, data):
-        """Maneja la carga de miniaturas de usuario."""
-        user = self.scope['user']
-        image_str = data.get('base64')
-        filename = data.get('filename')
+        user = self._get_user()
+        base64_value = self._extract_base64(data.get("base64"))
+        filename = data.get("filename")
 
-        if not image_str or not filename:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': 'Imagen o nombre de archivo inválidos.'
-            }))
+        if not base64_value or not filename:
+            self._send_error("Imagen o nombre de archivo invalidos.")
             return
 
         try:
-            image = ContentFile(base64.b64decode(image_str))
-            user.miniatura.save(filename, image, save=True)
-        except Exception as e:
-            self.send(text_data=json.dumps({
-                'source': 'error',
-                'message': f'Error al guardar la imagen: {str(e)}'
-            }))
+            image_bytes = base64.b64decode(base64_value)
+            user.miniatura.save(filename, ContentFile(image_bytes, name=filename), save=True)
+        except (ValueError, TypeError, binascii.Error):
+            self._send_error("La imagen recibida no tiene un formato valido.")
+            return
+        except Exception:
+            self._send_error("No se pudo guardar la imagen.")
             return
 
         serialized = UsuarioSerializer(user)
-        self.send_group(self.username, 'miniatura', serialized.data)
+        self.send_group(user.username, "miniatura", serialized.data)
 
     def send_group(self, group, source, data):
-        """Envía un mensaje a un grupo de canales."""
-        response = {
-            'type': 'broadcast_group',
-            'source': source,
-            'data': data
-        }
-        async_to_sync(self.channel_layer.group_send)(group, response)
+        send_group(group, source, data)
 
     def broadcast_group(self, event):
-        """Envía mensajes de forma global a través de broadcast."""
-        data = {
-            'source': event.get('source'),
-            'data': event.get('data')
-        }
-        self.send(text_data=json.dumps(data))
+        self.send(
+            text_data=json.dumps(
+                {
+                    "source": event.get("source"),
+                    "data": event.get("data"),
+                }
+            )
+        )
+
+    def send_push_notification(self, push_token, title, message):
+        send_push_notification(push_token, title, message)

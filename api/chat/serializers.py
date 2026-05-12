@@ -1,8 +1,32 @@
+from django.contrib.auth import password_validation
+from django.core.exceptions import ValidationError as DjangoValidationError
+from pathlib import Path
 from rest_framework import serializers
 from .models import Usuario, Connection, Message
 
+PASSWORD_ERROR_TRANSLATIONS = {
+    'This password is too short. It must contain at least 8 characters.': 'La contrasena debe tener al menos 8 caracteres.',
+    'This password is too common.': 'La contrasena es demasiado comun.',
+    'This password is entirely numeric.': 'La contrasena no puede ser solo numerica.',
+    'The password is too similar to the username.': 'La contrasena es demasiado parecida al usuario.',
+    'The password is too similar to the first name.': 'La contrasena es demasiado parecida al nombre.',
+    'The password is too similar to the last name.': 'La contrasena es demasiado parecida al apellido.',
+}
+
+
+def normalize_required_text(value, error_message):
+    normalized_value = value.strip() if isinstance(value, str) else ''
+    if not normalized_value:
+        raise serializers.ValidationError(error_message)
+    return normalized_value
+
+
+def translate_password_errors(messages):
+    return [PASSWORD_ERROR_TRANSLATIONS.get(message, message) for message in messages]
+
+
 class SignUpSerializer(serializers.ModelSerializer):
-    class Meta:  
+    class Meta:
         model = Usuario
         fields = [
             'username',
@@ -11,13 +35,31 @@ class SignUpSerializer(serializers.ModelSerializer):
             'password',
             'pushToken'
         ]
-        extra_kwargs = {  
+        extra_kwargs = {
             'password': {'write_only': True}
         }
 
     def validate_username(self, value):
-        if Usuario.objects.filter(username=value).exists():
-            raise serializers.ValidationError("Este nombre de usuario ya está en uso.")
+        normalized_value = normalize_required_text(value, "Ingresa un nombre de usuario valido.")
+        if Usuario.objects.filter(username__iexact=normalized_value).exists():
+            raise serializers.ValidationError("Este nombre de usuario ya esta en uso.")
+        return normalized_value
+
+    def validate_first_name(self, value):
+        return normalize_required_text(value, "Ingresa un nombre valido.")
+
+    def validate_last_name(self, value):
+        return normalize_required_text(value, "Ingresa un apellido valido.")
+
+    def validate_password(self, value):
+        username = self.initial_data.get('username', '')
+        provisional_user = Usuario(username=username.strip() if isinstance(username, str) else '')
+
+        try:
+            password_validation.validate_password(value, provisional_user)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(translate_password_errors(list(error.messages)))
+
         return value
 
     def create(self, validated_data):
@@ -52,17 +94,17 @@ class UsuarioSerializer(serializers.ModelSerializer):
 
 class SearchSerializer(UsuarioSerializer):
     status = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = Usuario
         fields = [
             'username',
             'name',
             'miniatura',
-            'status', 
+            'status',
             'pushToken'
         ]
-    
+
     def get_status(self, obj):
         if obj.pending_them:
             return 'pending-them'
@@ -105,7 +147,6 @@ class FriendSerializer(serializers.ModelSerializer):
 
     def get_friend(self, obj):
         user = self.context.get('user')
-        # Si el usuario actual es el sender, el amigo es el receiver, y viceversa.
         if user == obj.sender:
             return UsuarioSerializer(obj.receiver, context=self.context).data
         elif user == obj.receiver:
@@ -113,17 +154,23 @@ class FriendSerializer(serializers.ModelSerializer):
         return None
 
     def get_preview(self, obj):
-        if obj.latest_text:
-            return obj.latest_text
-        elif obj.latest_image:
+        latest_image = getattr(obj, 'latest_image', None)
+        latest_audio = getattr(obj, 'latest_audio', None)
+        latest_video = getattr(obj, 'latest_video', None)
+        latest_document = getattr(obj, 'latest_document', None)
+        latest_text = getattr(obj, 'latest_text', None)
+
+        if latest_image:
             return '[Imagen]'
-        elif obj.latest_audio:
+        elif latest_audio:
             return '[Audio]'
-        elif hasattr(obj, 'latest_video') and obj.latest_video:
+        elif latest_video:
             return '[Video]'
-        elif hasattr(obj, 'latest_document') and obj.latest_document:
+        elif latest_document:
             return '[Documento]'
-        return 'Nueva conexión'
+        elif latest_text:
+            return latest_text
+        return 'Nueva conexion'
 
     def get_updated(self, obj):
         date = getattr(obj, 'latest_created', None) or obj.updated
@@ -131,40 +178,48 @@ class FriendSerializer(serializers.ModelSerializer):
 
     def get_message(self, obj):
         user = self.context.get('user')
-        is_me = user == obj.sender
-        if obj.latest_text:
-            return {
-                "type": "text",
-                "text": obj.latest_text,
-                "isNew": obj.latest_is_new,
-                "is_me": is_me
-            }
-        elif obj.latest_image:
+        latest_image = getattr(obj, 'latest_image', None)
+        latest_audio = getattr(obj, 'latest_audio', None)
+        latest_video = getattr(obj, 'latest_video', None)
+        latest_document = getattr(obj, 'latest_document', None)
+        latest_text = getattr(obj, 'latest_text', None)
+        latest_is_new = getattr(obj, 'latest_is_new', False)
+        latest_user_id = getattr(obj, 'latest_user_id', None)
+        is_me = latest_user_id == getattr(user, 'id', None) if latest_user_id is not None else False
+
+        if latest_image:
             return {
                 "type": "image",
                 "text": "[Imagen]",
-                "isNew": obj.latest_is_new,
+                "isNew": latest_is_new,
                 "is_me": is_me
             }
-        elif obj.latest_audio:
+        elif latest_audio:
             return {
                 "type": "audio",
                 "text": "[Audio]",
-                "isNew": obj.latest_is_new,
+                "isNew": latest_is_new,
                 "is_me": is_me
             }
-        elif hasattr(obj, 'latest_video') and obj.latest_video:
+        elif latest_video:
             return {
                 "type": "video",
                 "text": "[Video]",
-                "isNew": obj.latest_is_new,
+                "isNew": latest_is_new,
                 "is_me": is_me
             }
-        elif hasattr(obj, 'latest_document') and obj.latest_document:
+        elif latest_document:
             return {
                 "type": "document",
                 "text": "[Documento]",
-                "isNew": obj.latest_is_new,
+                "isNew": latest_is_new,
+                "is_me": is_me
+            }
+        elif latest_text:
+            return {
+                "type": "text",
+                "text": latest_text,
+                "isNew": latest_is_new,
                 "is_me": is_me
             }
         else:
@@ -175,6 +230,7 @@ class MessageSerializer(serializers.ModelSerializer):
     is_me = serializers.SerializerMethodField()
     type = serializers.SerializerMethodField()
     isNew = serializers.BooleanField(source='is_new', read_only=True)
+    filename = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -186,13 +242,13 @@ class MessageSerializer(serializers.ModelSerializer):
             'audio',
             'video',
             'document',
+            'filename',
             'created',
             'type',
             'isNew'
         ]
 
     def get_is_me(self, obj):
-        # Compara el usuario actual con el usuario asociado al mensaje.
         return self.context.get('user') == obj.user
 
     def get_type(self, obj):
@@ -208,5 +264,9 @@ class MessageSerializer(serializers.ModelSerializer):
             return 'text'
         return 'unknown'
 
+    def get_filename(self, obj):
+        media_field = obj.image or obj.audio or obj.video or obj.document
+        if not media_field:
+            return ''
 
-
+        return Path(media_field.name).name

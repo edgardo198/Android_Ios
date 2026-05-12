@@ -1,1 +1,12 @@
-node_modules
+node_modules/
+venv/
+.venv/
+.pip-cache/
+.tmp/
+.logs/
+.downloads/
+.vscode/
+.expo/
+__pycache__/
+*.py[cod]
+*.sqlite3-journal
