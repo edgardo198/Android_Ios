@@ -40,10 +40,12 @@ docker compose up --build
 
 El compose levanta PostgreSQL, Redis, el backend Django en `http://localhost:8000` y el frontend web en `http://localhost:8084`.
 
-Si el puerto `8000` ya esta ocupado, puedes levantar todo con otro puerto para la API:
+Si algun puerto ya esta ocupado, puedes levantar todo con puertos alternos:
 
 ```powershell
 $env:API_PORT='8001'
+$env:POSTGRES_PORT='5433'
+$env:REDIS_PORT='6380'
 $env:EXPO_PUBLIC_API_URL='http://localhost:8001'
 docker compose up --build
 ```

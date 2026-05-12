@@ -1,5 +1,6 @@
 import base64
 import binascii
+import re
 
 import requests
 from asgiref.sync import async_to_sync
@@ -18,6 +19,7 @@ class ChatServiceError(Exception):
 
 
 PUSH_ENDPOINT = "https://exp.host/--/api/v2/push/send"
+SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._ -]+")
 
 MEDIA_CONFIG = {
     "image": {
@@ -129,6 +131,13 @@ def broadcast_message(message, sender, recipient, push_body=None):
     )
 
 
+def sanitize_upload_filename(filename, fallback="archivo"):
+    value = str(filename or "").replace("\x00", "").replace("\\", "/").strip()
+    value = value.rsplit("/", 1)[-1].strip()
+    value = SAFE_FILENAME_PATTERN.sub("_", value).strip(" .")
+    return value or fallback
+
+
 def content_file_from_base64(raw_value, filename):
     if not raw_value or not filename:
         raise ChatServiceError("Archivo o nombre de archivo invalido.")
@@ -136,11 +145,14 @@ def content_file_from_base64(raw_value, filename):
     base64_value = raw_value.split(",", 1)[1] if "," in raw_value else raw_value
 
     try:
-        file_bytes = base64.b64decode(base64_value)
+        file_bytes = base64.b64decode(base64_value, validate=True)
     except (ValueError, TypeError, binascii.Error) as error:
         raise ChatServiceError("El archivo recibido no tiene un formato valido.") from error
 
-    return ContentFile(file_bytes, name=filename)
+    if not file_bytes:
+        raise ChatServiceError("El archivo recibido esta vacio.")
+
+    return ContentFile(file_bytes, name=sanitize_upload_filename(filename))
 
 
 def create_media_message_from_file(user, connection, file_obj, media_type, *, broadcast=True):
@@ -148,9 +160,12 @@ def create_media_message_from_file(user, connection, file_obj, media_type, *, br
     if not config:
         raise ChatServiceError("Tipo de archivo no soportado.")
 
-    filename = getattr(file_obj, "name", None)
+    filename = sanitize_upload_filename(getattr(file_obj, "name", None))
     if not filename:
         raise ChatServiceError("Archivo o nombre de archivo invalido.")
+
+    if getattr(file_obj, "size", None) == 0:
+        raise ChatServiceError("El archivo recibido esta vacio.")
 
     message = None
     try:

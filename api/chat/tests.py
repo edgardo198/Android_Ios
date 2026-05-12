@@ -273,3 +273,59 @@ class MessageMediaUploadViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data['detail'], 'Tipo de archivo no soportado.')
+
+    @patch('chat.services.send_push_notification')
+    @patch('chat.services.send_group')
+    def test_upload_endpoint_broadcasts_media_payload_to_both_users(self, mocked_send_group, mocked_push):
+        self.receiver.pushToken = 'ExponentPushToken[test]'
+        self.receiver.save(update_fields=['pushToken'])
+        upload = SimpleUploadedFile('photo.jpg', b'image-bytes', content_type='image/jpeg')
+
+        response = self.client.post(
+            '/chat/messages/media/',
+            {
+                'connectionId': str(self.connection.id),
+                'type': 'image',
+                'file': upload,
+            },
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['message']['type'], 'image')
+        self.assertEqual(response.data['message']['filename'], 'photo.jpg')
+        self.assertEqual(response.data['friend']['username'], self.receiver.username)
+
+        self.assertEqual(mocked_send_group.call_count, 2)
+        sender_group, sender_source, sender_payload = mocked_send_group.call_args_list[0].args
+        receiver_group, receiver_source, receiver_payload = mocked_send_group.call_args_list[1].args
+
+        self.assertEqual(sender_group, self.sender.username)
+        self.assertEqual(receiver_group, self.receiver.username)
+        self.assertEqual(sender_source, 'message.send')
+        self.assertEqual(receiver_source, 'message.send')
+        self.assertEqual(sender_payload['message']['type'], 'image')
+        self.assertEqual(receiver_payload['message']['type'], 'image')
+        self.assertTrue(sender_payload['message']['is_me'])
+        self.assertFalse(receiver_payload['message']['is_me'])
+        mocked_push.assert_called_once_with(
+            self.receiver.pushToken,
+            self.sender.username,
+            'Imagen',
+        )
+
+    def test_upload_endpoint_rejects_empty_file(self):
+        upload = SimpleUploadedFile('empty.pdf', b'', content_type='application/pdf')
+
+        response = self.client.post(
+            '/chat/messages/media/',
+            {
+                'connectionId': str(self.connection.id),
+                'type': 'document',
+                'file': upload,
+            },
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'El archivo recibido esta vacio.')
