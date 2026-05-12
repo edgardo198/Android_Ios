@@ -2,7 +2,6 @@ import json
 
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import WebsocketConsumer
-from django.core.files.base import ContentFile
 from django.db.models import Exists, OuterRef, Q
 from django.db.models.functions import Coalesce
 
@@ -114,11 +113,6 @@ class ChatConsumer(WebsocketConsumer):
             return None
 
         return page
-
-    def _extract_base64(self, raw_value):
-        if not raw_value:
-            return None
-        return raw_value.split(",", 1)[1] if "," in raw_value else raw_value
 
     def _build_message_payload(self, message, current_user, friend):
         return build_message_payload(message, current_user, friend)
@@ -389,18 +383,12 @@ class ChatConsumer(WebsocketConsumer):
 
     def receive_miniatura(self, data):
         user = self._get_user()
-        base64_value = self._extract_base64(data.get("base64"))
-        filename = data.get("filename")
-
-        if not base64_value or not filename:
-            self._send_error("Imagen o nombre de archivo invalidos.")
-            return
 
         try:
-            image_bytes = base64.b64decode(base64_value)
-            user.miniatura.save(filename, ContentFile(image_bytes, name=filename), save=True)
-        except (ValueError, TypeError, binascii.Error):
-            self._send_error("La imagen recibida no tiene un formato valido.")
+            image_file = content_file_from_base64(data.get("base64"), data.get("filename"))
+            user.miniatura.save(image_file.name, image_file, save=True)
+        except ChatServiceError as error:
+            self._send_error(error.message)
             return
         except Exception:
             self._send_error("No se pudo guardar la imagen.")

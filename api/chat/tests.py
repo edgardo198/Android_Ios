@@ -1,4 +1,5 @@
 import base64
+import json
 import shutil
 import tempfile
 from unittest.mock import patch
@@ -48,10 +49,17 @@ class ChatConsumerMediaTests(TestCase):
         consumer = ChatConsumer()
         consumer.scope = {'user': user}
         consumer.sent_groups = []
+        consumer.sent_messages = []
         consumer.send_group = lambda group, source, data: consumer.sent_groups.append(
             {'group': group, 'source': source, 'data': data}
         )
-        consumer.send = lambda *args, **kwargs: None
+
+        def capture_send(*args, **kwargs):
+            text_data = kwargs.get('text_data') or (args[0] if args else None)
+            if text_data:
+                consumer.sent_messages.append(json.loads(text_data))
+
+        consumer.send = capture_send
         return consumer
 
     @patch('chat.consumers.ChatConsumer.send_push_notification', autospec=True)
@@ -126,6 +134,78 @@ class ChatConsumerMediaTests(TestCase):
         self.assertEqual(len(consumer.sent_groups), 2)
         self.assertEqual(consumer.sent_groups[0]['data']['message']['type'], 'document')
         mocked_push.assert_not_called()
+
+    @patch('chat.consumers.ChatConsumer.send_push_notification', autospec=True)
+    def test_receive_message_send_audio_accepts_data_url_base64(self, mocked_push):
+        consumer = self.make_consumer(self.sender)
+
+        consumer.receive_message_send_audio(
+            {
+                'connectionId': self.connection.id,
+                'base64': f'data:audio/mp4;base64,{encode_bytes(b"audio-bytes")}',
+                'filename': 'voice-note.m4a',
+            }
+        )
+
+        message = Message.objects.get(connection=self.connection)
+        self.assertTrue(message.audio.name.endswith('voice-note.m4a'))
+        self.assertEqual(consumer.sent_groups[0]['data']['message']['type'], 'audio')
+        mocked_push.assert_not_called()
+
+    def test_receive_message_send_document_rejects_invalid_base64(self):
+        consumer = self.make_consumer(self.sender)
+
+        consumer.receive_message_send_document(
+            {
+                'connectionId': self.connection.id,
+                'base64': 'not-valid-base64!!!',
+                'filename': 'report.pdf',
+            }
+        )
+
+        self.assertFalse(Message.objects.exists())
+        self.assertEqual(consumer.sent_messages[-1]['source'], 'error')
+        self.assertEqual(
+            consumer.sent_messages[-1]['message'],
+            'El archivo recibido no tiene un formato valido.',
+        )
+
+    def test_receive_miniatura_saves_data_url_base64(self):
+        consumer = self.make_consumer(self.sender)
+
+        consumer.receive_miniatura(
+            {
+                'base64': f'data:image/png;base64,{encode_bytes(b"avatar-bytes")}',
+                'filename': '../avatar.png',
+            }
+        )
+
+        self.sender.refresh_from_db()
+        self.assertTrue(self.sender.miniatura)
+        self.assertTrue(self.sender.miniatura.name.startswith('miniatura/'))
+        self.assertTrue(self.sender.miniatura.name.endswith('.png'))
+        self.assertNotIn('..', self.sender.miniatura.name)
+        self.assertEqual(len(consumer.sent_groups), 1)
+        self.assertEqual(consumer.sent_groups[0]['source'], 'miniatura')
+        self.assertEqual(consumer.sent_groups[0]['data']['username'], self.sender.username)
+
+    def test_receive_miniatura_rejects_invalid_base64(self):
+        consumer = self.make_consumer(self.sender)
+
+        consumer.receive_miniatura(
+            {
+                'base64': 'data:image/png;base64,not-valid-base64!!!',
+                'filename': 'avatar.png',
+            }
+        )
+
+        self.sender.refresh_from_db()
+        self.assertFalse(self.sender.miniatura)
+        self.assertEqual(consumer.sent_messages[-1]['source'], 'error')
+        self.assertEqual(
+            consumer.sent_messages[-1]['message'],
+            'El archivo recibido no tiene un formato valido.',
+        )
 
     def test_receive_friend_list_includes_latest_video_preview(self):
         Message.objects.create(
