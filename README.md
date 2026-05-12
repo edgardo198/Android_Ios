@@ -45,16 +45,18 @@ El compose levanta PostgreSQL, Redis y el backend Django en `http://localhost:80
 Con la base SQLite actual en `api/db.sqlite3`, exporta los datos:
 
 ```powershell
-.\.venv\Scripts\python.exe api\manage.py dumpdata --exclude contenttypes --exclude auth.Permission --indent 2 > api\db-export.json
+$env:PYTHONUTF8='1'
+.\.venv\Scripts\python.exe api\manage.py dumpdata --exclude contenttypes --exclude auth.Permission --indent 2 --output api\db-export.json
 ```
 
-Luego levanta PostgreSQL y carga el respaldo:
+Luego levanta PostgreSQL y carga el respaldo desde el contenedor `api`:
 
 ```powershell
 docker compose up -d db redis
-$env:DATABASE_URL='postgresql://android_ios:android_ios@localhost:5432/android_ios'
-.\.venv\Scripts\python.exe api\manage.py migrate
-.\.venv\Scripts\python.exe api\manage.py loaddata api\db-export.json
+docker compose build api
+docker compose run --rm api python manage.py migrate
+$fixture = (Resolve-Path .\api\db-export.json).Path
+docker compose run --rm -v "${fixture}:/app/db-export.json:ro" api python manage.py loaddata /app/db-export.json
 ```
 
 Cuando confirmes que todo funciona en PostgreSQL, elimina `api\db-export.json`; ese archivo no debe subirse a Git.
