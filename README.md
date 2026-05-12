@@ -38,7 +38,15 @@ $env:DATABASE_URL='postgresql://android_ios:android_ios@localhost:5432/android_i
 docker compose up --build
 ```
 
-El compose levanta PostgreSQL, Redis y el backend Django en `http://localhost:8000`.
+El compose levanta PostgreSQL, Redis, el backend Django en `http://localhost:8000` y el frontend web en `http://localhost:8084`.
+
+Si el puerto `8000` ya esta ocupado, puedes levantar todo con otro puerto para la API:
+
+```powershell
+$env:API_PORT='8001'
+$env:EXPO_PUBLIC_API_URL='http://localhost:8001'
+docker compose up --build
+```
 
 ## Migrar SQLite a PostgreSQL
 
