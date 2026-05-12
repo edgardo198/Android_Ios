@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: android_ios
+      POSTGRES_USER: android_ios
+      POSTGRES_PASSWORD: android_ios
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U android_ios -d android_ios"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build: ./api
+    command: sh -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 api.asgi:application"
+    environment:
+      DEBUG: "true"
+      SECRET_KEY: "change-me"
+      ALLOWED_HOSTS: "*"
+      DATABASE_URL: postgresql://android_ios:android_ios@db:5432/android_ios
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api/media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+volumes:
+  postgres_data:

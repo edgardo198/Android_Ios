@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 import os
 from pathlib import Path
+from urllib.parse import parse_qsl, unquote, urlparse
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -19,7 +21,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%'
+SECRET_KEY = os.getenv(
+    'SECRET_KEY',
+    'django-insecure-n3c_2d@ljxahu)^qx#ubyt&2qdb+ran_qf$za843&0f139+j$%',
+)
 
 
 def env_bool(name, default=False):
@@ -123,14 +128,55 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'api.wsgi.application'
 
+def database_from_url(database_url):
+    parsed = urlparse(database_url)
+    engine_by_scheme = {
+        'postgres': 'django.db.backends.postgresql',
+        'postgresql': 'django.db.backends.postgresql',
+    }
+    engine = engine_by_scheme.get(parsed.scheme)
+    if not engine:
+        raise ValueError(f'DATABASE_URL usa un motor no soportado: {parsed.scheme}')
+
+    return {
+        'ENGINE': engine,
+        'NAME': unquote(parsed.path.lstrip('/')),
+        'USER': unquote(parsed.username or ''),
+        'PASSWORD': unquote(parsed.password or ''),
+        'HOST': parsed.hostname or '',
+        'PORT': str(parsed.port or ''),
+        'OPTIONS': dict(parse_qsl(parsed.query)),
+    }
+
+
+def get_default_database():
+    database_url = os.getenv('DATABASE_URL')
+    if database_url:
+        return database_from_url(database_url)
+
+    postgres_name = os.getenv('POSTGRES_DB')
+    postgres_host = os.getenv('POSTGRES_HOST')
+    if postgres_name or postgres_host:
+        return {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': postgres_name or 'android_ios',
+            'USER': os.getenv('POSTGRES_USER', 'android_ios'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
+            'HOST': postgres_host or 'localhost',
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        }
+
+    return {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
+    }
+
+
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': get_default_database(),
 }
 
 # Password validation

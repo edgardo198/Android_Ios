@@ -24,12 +24,40 @@ npm install
 
 En desarrollo local, si no defines `REDIS_URL`, Django usa un channel layer en memoria para que el proyecto funcione sin Redis.
 
+Para usar PostgreSQL fuera de Docker, define `DATABASE_URL` antes de ejecutar Django:
+
+```powershell
+$env:DATABASE_URL='postgresql://android_ios:android_ios@localhost:5432/android_ios'
+.\.venv\Scripts\python.exe api\manage.py migrate
+.\.venv\Scripts\python.exe api\manage.py runserver 0.0.0.0:8000
+```
+
 ## Docker backend
 
 ```powershell
-docker build -t android-ios-api:latest api
-docker run --rm -p 8000:8000 -e DEBUG=true android-ios-api:latest
+docker compose up --build
 ```
+
+El compose levanta PostgreSQL, Redis y el backend Django en `http://localhost:8000`.
+
+## Migrar SQLite a PostgreSQL
+
+Con la base SQLite actual en `api/db.sqlite3`, exporta los datos:
+
+```powershell
+.\.venv\Scripts\python.exe api\manage.py dumpdata --exclude contenttypes --exclude auth.Permission --indent 2 > api\db-export.json
+```
+
+Luego levanta PostgreSQL y carga el respaldo:
+
+```powershell
+docker compose up -d db redis
+$env:DATABASE_URL='postgresql://android_ios:android_ios@localhost:5432/android_ios'
+.\.venv\Scripts\python.exe api\manage.py migrate
+.\.venv\Scripts\python.exe api\manage.py loaddata api\db-export.json
+```
+
+Cuando confirmes que todo funciona en PostgreSQL, elimina `api\db-export.json`; ese archivo no debe subirse a Git.
 
 Para publicar la imagen, etiqueta el repositorio destino y haz push:
 
