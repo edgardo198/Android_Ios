@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "Mensajeria",
+    "slug": "App",
+    "scheme": "chatlocal",
+    "version": "1.1.5",
+    "orientation": "portrait",
+    "icon": "./assets/brand/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.yourcompany.app",
+      "buildNumber": "1.1.5"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/adaptive-foreground.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.yourcompany.app",
+      "versionCode": 7
+    },
+    "web": {
+      "favicon": "./assets/brand/favicon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Permite usar la cámara para probar y realizar videollamadas.",
+          "microphonePermission": "Permite usar el micrófono para probar y realizar llamadas."
+        }
+      ],
+      "./plugins/withPinnedWebRtc",
+      "./plugins/withCallService",
+      "./plugins/withApiTransport",
+      "./plugins/withBrandIconInset",
+      [
+        "expo-secure-store",
+        {
+          "requireAuthentication": false
+        }
+      ],
+      "expo-asset",
+      "expo-font",
+      "expo-image",
+      "expo-status-bar",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Permite grabar notas de voz.",
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-video",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/brand/adaptive-foreground.png",
+          "backgroundColor": "#FFFFFF",
+          "resizeMode": "contain",
+          "imageWidth": 200
+        }
+      ]
+    ],
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    }
+  }
+}

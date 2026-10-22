@@ -1,0 +1,4 @@
+Dockerfile.render text eol=lf
+scripts/render/*.sh text eol=lf
+scripts/render/*.conf text eol=lf
+render.yaml text eol=lf

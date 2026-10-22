@@ -1,0 +1,11 @@
+# Dependencias directas. requirements.txt fija tambien las transitivas.
+Django>=5.2.18,<5.3
+djangorestframework>=3.18.2,<3.19
+djangorestframework-simplejwt>=5.5,<6
+channels>=4.3,<5
+channels-redis>=4.3,<5
+daphne>=4.2,<5
+django-cors-headers>=4.7,<5
+pillow>=11.3,<13
+psycopg[binary]>=3.2,<4
+requests>=2.32.5,<3

@@ -1,0 +1,41 @@
+# Prueba gratuita de octubre de 2026. Revisar y cerrar manualmente al terminar el mes.
+# No incluye apagado automatico. Adjuntos efimeros; Postgres vence a los 30 dias.
+services:
+  - type: web
+    name: mensajeria
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /health/
+    autoDeployTrigger: off
+    envVars:
+      - key: DEBUG
+        value: "false"
+      - key: PORT
+        value: "10000"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mensajeria-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: mensajeria-redis
+          property: connectionString
+  - type: keyvalue
+    name: mensajeria-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+databases:
+  - name: mensajeria-db
+    plan: free
+    region: oregon
+    databaseName: mensajeria
+    user: mensajeria
+    ipAllowList: []
