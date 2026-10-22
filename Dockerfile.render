@@ -6,7 +6,8 @@ COPY App/ ./
 ENV EXPO_PUBLIC_API_SAME_ORIGIN=true
 # The web client uses this service's HTTPS origin for REST and WebSockets.
 ENV EXPO_PUBLIC_API_URL=""
-RUN npx expo export --platform web --output-dir dist
+# Keep Metro within the free builder's memory budget.
+RUN NODE_OPTIONS=--max-old-space-size=2048 npx expo export --platform web --max-workers 1 --output-dir dist
 
 FROM python:3.12-slim AS dependencies
 WORKDIR /build
