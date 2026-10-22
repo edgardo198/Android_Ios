@@ -16,7 +16,7 @@ import Input from '../common/Input';
 import WebBackButton from '../common/WebBackButton';
 import styles from '../Styles/styles';
 import api from '../core/api';
-import { normalizeApiError } from '../common/apiError';
+import { connectionErrorMessage, normalizeApiError } from '../common/apiError';
 import useGlobal from '../core/global';
 import { normalizeRecoveryEmail, recoveryEmailError } from '../common/passwordRecovery';
 
@@ -126,7 +126,7 @@ function SignUpScreen({ navigation }) {
     } catch (error) {
       const message = error.response
         ? normalizeApiError(error.response.data)
-        : 'No se pudo conectar con el servidor. Verifica que el backend este encendido.';
+        : connectionErrorMessage(error);
 
       setSubmitError(message);
     } finally {

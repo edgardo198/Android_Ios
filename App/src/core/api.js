@@ -125,7 +125,7 @@ function getHealthUrl(baseUrl) {
   return `${baseUrl.replace(/\/+$/, '')}/health/`;
 }
 
-async function fetchWithTimeout(url, timeoutMs = 1500) {
+async function fetchHealthWithTimeout(url, timeoutMs = 1500) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   let timeoutId;
 
@@ -138,10 +138,15 @@ async function fetchWithTimeout(url, timeoutMs = 1500) {
 
   try {
     return await Promise.race([
-      fetch(url, {
-        method: 'GET',
-        signal: controller?.signal,
-      }),
+      (async () => {
+        const response = await fetch(url, {
+          method: 'GET',
+          signal: controller?.signal,
+        });
+        // A hosting provider's HTML startup page is not a ready API. Include
+        // reading the body in the timeout as well as receiving the headers.
+        return response?.ok && (await response.json())?.status === 'ok';
+      })(),
       timeoutPromise,
     ]);
   } finally {
@@ -171,9 +176,19 @@ const initialApiBaseUrl =
     ? configuredBaseUrl
     : rewriteLoopbackUrl(configuredBaseUrl, expoHost);
 
+const renderHostedApi = (() => {
+  try {
+    const url = new URL(initialApiBaseUrl);
+    return url.protocol === 'https:' && url.hostname.endsWith('.onrender.com');
+  } catch {
+    return false;
+  }
+})();
+
 let resolvedApiBaseUrl = initialApiBaseUrl;
 let apiBaseUrlVerified = false;
 let apiBaseUrlPromise = null;
+let apiLastUsedAt = null;
 
 export const API_BASE_URL = initialApiBaseUrl;
 export const ADDRESS = API_BASE_URL.replace(/^https?:\/\//i, '');
@@ -182,7 +197,7 @@ export const WS_BASE_URL = API_BASE_URL.replace(/^http/i, 'ws');
 function getApiBaseUrlCandidates() {
   // An explicitly configured server is authoritative, including in production.
   // Never send credentials to a different server discovered on the local network.
-  if (explicitBaseUrl || (typeof __DEV__ !== 'undefined' && !__DEV__)) {
+  if (explicitBaseUrl || renderHostedApi || (typeof __DEV__ !== 'undefined' && !__DEV__)) {
     return [initialApiBaseUrl];
   }
   const runtimeHost = getRuntimeHost();
@@ -209,12 +224,34 @@ function getApiBaseUrlCandidates() {
 }
 
 async function resolveReachableApiBaseUrl() {
+  if (renderHostedApi) {
+    // Free Render instances can sleep between visits. Warm only the configured
+    // server with GETs; no credentials or mutations are sent until it is ready.
+    const deadline = Date.now() + 90000;
+    while (Date.now() < deadline) {
+      try {
+        if (await fetchHealthWithTimeout(getHealthUrl(initialApiBaseUrl), Math.min(10000, deadline - Date.now()))) {
+          resolvedApiBaseUrl = initialApiBaseUrl;
+          apiBaseUrlVerified = true;
+          apiLastUsedAt = Date.now();
+          return resolvedApiBaseUrl;
+        }
+      } catch {
+        // Retry only this harmless readiness request, within the same budget.
+      }
+      const remaining = deadline - Date.now();
+      if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, Math.min(1000, remaining)));
+    }
+    const error = new Error('El servidor todavía no responde. Espera un momento y vuelve a intentarlo.');
+    error.code = 'SERVER_UNAVAILABLE';
+    throw error;
+  }
+
   const candidates = getApiBaseUrlCandidates();
 
   for (const candidate of candidates) {
     try {
-      const response = await fetchWithTimeout(getHealthUrl(candidate));
-      if (response?.ok) {
+      if (await fetchHealthWithTimeout(getHealthUrl(candidate))) {
         resolvedApiBaseUrl = candidate;
         apiBaseUrlVerified = true;
         return resolvedApiBaseUrl;
@@ -228,6 +265,11 @@ async function resolveReachableApiBaseUrl() {
 }
 
 export async function getApiBaseUrl() {
+  const now = Date.now();
+  if (renderHostedApi && apiLastUsedAt !== null && now - apiLastUsedAt >= 60000) {
+    apiBaseUrlVerified = false;
+  }
+  apiLastUsedAt = now;
   if (apiBaseUrlVerified) {
     return resolvedApiBaseUrl;
   }
@@ -309,6 +351,9 @@ export async function getAccessToken(forceRefresh = false) {
     const pendingRefresh = (async () => {
       try {
         const baseURL = await getApiBaseUrl();
+        if (generation !== authGeneration) {
+          throw sessionChangedError();
+        }
         // Use a separate request to avoid the authentication interceptors recursively refreshing.
         const response = await axios.post(`${baseURL}/chat/token/refresh/`, { refresh }, {
           timeout: 15000,

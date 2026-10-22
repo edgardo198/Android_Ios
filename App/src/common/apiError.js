@@ -8,6 +8,13 @@ const ERROR_TRANSLATIONS = new Map([
   ['Username and password required.', 'Ingresa tu usuario y contraseña.'],
 ]);
 
+export function connectionErrorMessage(error) {
+  if (error?.code === 'SERVER_UNAVAILABLE') {
+    return 'El servidor está tardando en responder. Espera un momento y vuelve a intentarlo.';
+  }
+  return 'No se pudo conectar con el servidor. Revisa tu conexión a Internet e intenta nuevamente.';
+}
+
 export function normalizeApiError(data, fallback = 'No se pudo completar la operación.') {
   if (typeof data === 'string') {
     const message = data.trim();

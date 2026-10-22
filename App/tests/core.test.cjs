@@ -1302,7 +1302,7 @@ function apiHarness(options = {}) {
   }, {
     process: { env: { EXPO_PUBLIC_API_URL: 'http://127.0.0.1:8000' } },
     __DEV__: true,
-    fetch: async () => ({ ok: true }),
+    fetch: async () => ({ ok: true, json: async () => ({ status: 'ok' }) }),
   });
   exported.setSessionExpiredHandler(() => expired.push(true));
   return { ...exported, secure, requests, refreshRequests, expired };

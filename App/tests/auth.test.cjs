@@ -243,6 +243,31 @@ test('an unavailable server leaves sign-in usable and displays a friendly connec
   assert.equal(screen.button().props.disabled, false);
 });
 
+test('sign-in and registration explain server startup failures and preserve the form for a manual retry', async () => {
+  for (const name of ['Signin', 'SignUp']) {
+    const screen = screenHarness(name, async () => {
+      throw Object.assign(new Error('INTERNAL readiness details'), { code: 'SERVER_UNAVAILABLE' });
+    });
+    screen.setField('Usuario', 'prueba');
+    screen.setField('Contrasena', 'password-with-spaces  ');
+    if (name === 'SignUp') {
+      screen.setField('Nombre', 'Ana');
+      screen.setField('Apellido', 'Pérez');
+      screen.setField('Correo electrónico', 'ana@example.com');
+      screen.setField('Confirmar Contrasena', 'password-with-spaces  ');
+    }
+    await screen.submit();
+    assert.match(screen.errorText(), /servidor.*tardando.*Espera/);
+    assert.doesNotMatch(screen.errorText(), /INTERNAL|readiness details/);
+    assert.equal(screen.button().props.disabled, false);
+    assert.equal(screen.calls.logins.length, 0);
+    const submitted = screen.calls.requests[0].data;
+    await screen.submit();
+    assert.equal(screen.calls.requests.length, 2);
+    assert.deepEqual(screen.calls.requests[1].data, submitted);
+  }
+});
+
 test('registration validation failures are visible inline without logging or losing password spaces', async () => {
   const responseData = { username: ['Este nombre de usuario ya está en uso.'] };
   const screen = screenHarness('SignUp', async () => { throw apiFailure(400, responseData); });
