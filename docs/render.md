@@ -2,6 +2,10 @@
 
 Estado: **correccion de desconexiones desplegada y verificada el 24 de octubre de 2026**.
 
+Version activa: **1.1.9**, revision `bee1ff0b0577e3c0b211abf5e67f3694a3eb14cc`,
+despliegue `dep-dbecu65g1s2s73f6v3c0`, desde las 09:33:09 de Honduras del
+24 de octubre. [Verificacion de fotos y subida HTTP de perfil](revision-fotos-1.1.9.md).
+
 Web y API: https://mensajeria-pruebas-octubre-2026.onrender.com
 
 Codigo publicado: https://github.com/edgardo198/Android_Ios/tree/render-pruebas-octubre-2026
@@ -58,7 +62,7 @@ y respuesta de presencia de llamadas. Los resultados sin credenciales estan en
 `.local/web-verification/redis-idle-results.json` y `native-idle-results.json`.
 No habia telefono conectado: la interaccion fisica en Android sigue pendiente.
 
-La revision activa desde las 07:39:20 del 24 de octubre es
+La revision que activo el respaldo de fotos a las 07:39:20 del 24 de octubre fue
 `919414cd1160682afff0c2a5cfb2c5a6ba9e66d6`, despliegue
 `dep-dbeb9c29lscs73aj2um0`. Agrega [copias privadas de fotos nuevas en PostgreSQL](fotos-render.md),
 con un presupuesto conjunto de 100 MiB. Una foto sintetica sobrevivio al reemplazo
@@ -118,9 +122,9 @@ Las cuentas creadas en el servidor local no se copiaron a esta base de pruebas.
 ## Limites del plan gratuito
 
 - PostgreSQL vence a los 30 dias. Guarda copias antes de su vencimiento.
-- Las fotos nuevas del chat tienen copia privada en PostgreSQL (hasta 100 MiB
+- Las fotos nuevas del chat y los avatares tienen copia en PostgreSQL (hasta 100 MiB
   en total) desde la correccion del 24 de octubre. No recupera fotos anteriores
-  perdidas. Avatares, audio, video y documentos siguen en disco temporal y se
+  perdidas. Audio, video y documentos siguen en disco temporal y se
   pierden al reiniciar, redesplegar o suspender. No se migran archivos ni usuarios
   locales automaticamente. La copia de fotos dura mientras siga vigente la base.
 - El servicio duerme despues de 15 minutos sin trafico y puede tardar alrededor

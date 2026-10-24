@@ -1,6 +1,13 @@
 # APK de pruebas con Render
 
-Version Android: **1.1.7**, codigo **9**.
+Version Android actual: **1.1.9**, codigo **11**. Instalada en el Note 9 el 24 de
+octubre de 2026 como actualizacion sin borrar datos. La firma coincide con la
+version anterior. Archivo: `.downloads/apk/Mensajeria-1.1.9-Render-pruebas.apk`.
+Detalles y verificacion en [revision de fotos 1.1.9](revision-fotos-1.1.9.md).
+
+## Registro de la version 1.1.7
+
+Version Android de este registro historico: **1.1.7**, codigo **9**.
 
 Estado: **compilado, verificado e instalado el 22 de octubre de 2026** en un
 Samsung Note 9 SM-N960U con Android 10. Se actualizo la version 1.1.5 con

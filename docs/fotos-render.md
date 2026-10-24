@@ -2,6 +2,10 @@
 
 Estado (24 de octubre de 2026): activa y verificada en Render.
 
+Actualizacion posterior: [1.1.9](revision-fotos-1.1.9.md) agrega respaldo de
+avatares en el mismo presupuesto de 100 MiB y subida de perfil por HTTP. El
+registro siguiente describe la activacion inicial del respaldo de fotos del chat.
+
 Revision `919414cd1160682afff0c2a5cfb2c5a6ba9e66d6`, despliegue
 `dep-dbeb9c29lscs73aj2um0`, activo desde las 07:39:20 de Honduras.
 La migracion `chat.0015_message_image_archive` se aplico correctamente.

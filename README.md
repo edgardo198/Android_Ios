@@ -1,6 +1,13 @@
 # Mensajeria: Android, iOS y web
 
-Proyecto de mensajeria con Expo SDK 57, React Native y Django Channels. La versión actual del proyecto es **1.1.5**, código Android **7**. Los archivos se suben por HTTP multipart; WebSocket entrega mensajes, historial y eventos de lectura. El backend valida la conexion y conserva el mensaje antes de intentar su entrega en tiempo real.
+Proyecto de mensajeria con Expo SDK 57, React Native y Django Channels. La versión actual del proyecto es **1.1.9**, código Android **11**, desplegada en Render e instalada en el Note 9. Los archivos y fotos de perfil se suben por HTTP multipart; WebSocket entrega mensajes, historial y eventos de lectura. El backend valida la conexion y conserva el mensaje antes de intentar su entrega en tiempo real.
+
+La compilación Android para Render se documenta en [APK de pruebas con Render](docs/android-render.md).
+
+La [revision de fotos 1.1.9](docs/revision-fotos-1.1.9.md) corrige el envio de perfil
+al volver de la galeria y la carga de enlaces temporales. Fotos nuevas y avatares
+tienen copia privada en PostgreSQL, con un presupuesto conjunto de 100 MiB durante
+la vigencia de la prueba. Las fotos anteriores perdidas necesitan reenviarse.
 
 Esta etapa agrega **avisos de mensajes y llamadas con la interfaz Android cerrada**,
 mediante un receptor nativo y notificación permanente conectados al servidor propio.
