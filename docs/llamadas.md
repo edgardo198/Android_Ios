@@ -196,7 +196,9 @@ Por defecto la API devuelve `iceServers: []`: no se utilizan servidores
 STUN/TURN públicos ni servicios de llamadas. Esta configuración sirve para
 probar una ruta directa en una red compatible. Para redes distintas configura
 un servidor **coturn propio**, sus certificados y puertos, y entrega sus URLs
-al proceso del backend. Ejemplo con nombres ficticios:
+al proceso del backend. La [guía de coturn propio](coturn-propio.md) incluye el
+generador de configuración privada y los pasos de instalación y comprobación.
+Ejemplo con nombres ficticios:
 
 ```powershell
 $env:CALLS_STUN_URLS = 'stun:turn.mi-servidor.local:3478'
