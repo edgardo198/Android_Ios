@@ -223,7 +223,7 @@ test('acceptance on another recipient device aborts pending capture and never se
   h.client.deactivate();
 });
 
-test('socket loss immediately stops media and publishes an ended call', async () => {
+test('socket loss before media connects stops capture and publishes an ended call', async () => {
   const h = harness(); await h.login(); await h.client.startCall(1, 'video', { username: 'bob' });
   h.sockets[0].close(); await settle();
   assert.equal(h.media[0].closes, 1);
@@ -231,6 +231,41 @@ test('socket loss immediately stops media and publishes an ended call', async ()
   assert.equal(h.client.getState().call.status, 'ended');
   assert.match(h.client.getState().call.reason, /conexión/);
   h.client.deactivate();
+});
+
+test('connected audio and video survive signaling reconnection without recreating media', async () => {
+  for (const kind of ['audio', 'video']) {
+    const h = harness(); await connectMedia(h, kind);
+    h.sockets[0].close(); await settle();
+    assert.equal(h.media[0].closes, 0);
+    assert.equal(h.client.getState().connected, false);
+    const deadline = [...h.timers.values()].find(timer => timer.delay === 20000);
+    assert(deadline);
+    [...h.timers.values()].find(timer => timer.delay === 3000).callback();
+    await settle(); h.sockets[1].open(); await settle();
+    assert.equal(h.client.getState().connected, true);
+    assert.equal(h.media.length, 1);
+    assert.equal(h.media[0].closes, 0);
+    assert(h.sockets[1].sent.some(message => message.type === 'call.connected'));
+    assert(![...h.timers.values()].includes(deadline));
+    // A second outage must get a fresh deadline after the first recovery.
+    h.sockets[1].close(); await settle();
+    const nextDeadline = [...h.timers.values()].find(timer => timer.delay === 20000);
+    assert(nextDeadline);
+    nextDeadline.callback(); await settle();
+    assert.equal(h.media[0].closes, 1);
+    assert.equal(h.client.getState().call.status, 'ended');
+    h.client.deactivate();
+  }
+});
+
+test('logout during signaling recovery cancels the recovery deadline and closes media', async () => {
+  const h = harness(); await connectMedia(h);
+  h.sockets[0].close(); await settle();
+  h.client.deactivate(); await settle();
+  assert.equal(h.media[0].closes, 1);
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.client.getState().call, null);
 });
 
 test('logout closes the old socket and media without sending HTTP using a new account', async () => {

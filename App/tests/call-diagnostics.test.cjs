@@ -342,12 +342,14 @@ test('a camera switch finishing after stop cannot change or report an error in t
 
 test('profile exposes diagnostics and call history without starting capture or leaving the current session', () => {
   const routes = [];
-  const react = { createElement: (type, attributes, ...children) => ({ type, props: { ...attributes, children } }) };
+  const react = { createElement: (type, attributes, ...children) => ({ type, props: { ...attributes, children } }),
+    useState: value => [value, () => {}], useRef: value => ({current: value}), useEffect: () => {} };
   const Screen = loadModule('src/screens/Profile.jsx', {
     react,
     'react-native': { View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Modal: 'Modal', ScrollView: 'ScrollView', Alert: {}, Platform: { OS: 'android' }, StyleSheet: { create: (value) => value } },
     '@fortawesome/react-native-fontawesome': {}, '@fortawesome/free-solid-svg-icons': {},
     'expo-image-picker': {}, 'expo-image-manipulator': {},
+    '../components/Message/mediaFiles': { appendUploadFile() { throw new Error('Navigation must not upload files'); } },
     '../core/global': (selector) => selector({ user: { username: 'Me' } }),
     '../common/Miniatura': 'Avatar', '../Styles/styles': {},
     '../common/Input': 'Input', '../common/Button': 'Button',

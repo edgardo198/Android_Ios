@@ -61,6 +61,7 @@ export function createCallClient({ request, getToken, getWsUrl, getIdentity, get
     op.controller.abort();
     clearTimeout(op.mediaTimer);
     clearTimeout(op.disconnectTimer);
+    clearTimeout(op.signalingTimer);
     try { op.rtc?.close(); } catch { /* Continue ending the call. */ }
     try { Promise.resolve(op.nativeLease?.stop()).catch(() => {}); } catch { /* Continue ending the call. */ }
     publish({ audioRoutes: [], audioRoute: null, audioRouteError: null });
@@ -360,7 +361,14 @@ export function createCallClient({ request, getToken, getWsUrl, getIdentity, get
       ws.onopen = () => {
         if (socket !== ws || generation !== epoch || !authorized()) { ws.close(); return; }
         publish({ connected: true });
-        refresh(generation).catch(() => null);
+        refresh(generation).then(() => {
+          if (socket !== ws || generation !== epoch || !authorized()) return;
+          clearTimeout(operation?.signalingTimer);
+          if (operation) operation.signalingTimer = null;
+          if (operation?.mediaConnected && rawCall && ownDevice(rawCall)) {
+            send({ type: 'call.connected', callId: rawCall.id, deviceId });
+          }
+        }).catch(() => null);
         send({ type: 'call.ping' });
         clearInterval(pulseTimer);
         pulseTimer = setInterval(() => {
@@ -419,7 +427,14 @@ export function createCallClient({ request, getToken, getWsUrl, getIdentity, get
         accessExpiresAt = null;
         socket = null;
         publish({ connected: false });
-        if (operation || rawCall) finish('Se perdió la conexión. Vuelve a llamar.');
+        if (operation?.mediaConnected) {
+          // Media travels independently of signaling. Keep the existing peer
+          // during a brief socket outage, but bound recovery below server TTL.
+          const op = operation;
+          if (!op.signalingTimer) op.signalingTimer = setTimeout(() => {
+            if (current(op)) finish('Se perdió la conexión. Vuelve a llamar.');
+          }, 20000);
+        } else if (operation || rawCall) finish('Se perdió la conexión. Vuelve a llamar.');
         if (authorized()) reconnectTimer = setTimeout(() => connect(generation), 3000);
       };
     } catch {
