@@ -1,6 +1,10 @@
 # Fotos del chat en la prueba de Render
 
-Estado (24 de octubre de 2026): correccion preparada y probada; despliegue pendiente.
+Estado (24 de octubre de 2026): activa y verificada en Render.
+
+Revision `919414cd1160682afff0c2a5cfb2c5a6ba9e66d6`, despliegue
+`dep-dbeb9c29lscs73aj2um0`, activo desde las 07:39:20 de Honduras.
+La migracion `chat.0015_message_image_archive` se aplico correctamente.
 
 El servicio gratuito guarda los adjuntos en un disco efimero. Render elimina sus
 cambios al redesplegar, reiniciar o suspender la instancia. La base conserva el
@@ -12,7 +16,7 @@ servidor local son anteriores al despliegue y no corresponden a esas subidas.
 Las imagenes sin original ni archivo de respaldo no se pueden reconstruir a
 partir del mensaje; hay que reenviarlas desde un dispositivo que las conserve.
 
-## Correccion preparada
+## Proteccion activa
 
 Las fotos nuevas y GIF se copian, sin alterar sus bytes, a una tabla separada de
 PostgreSQL antes de confirmar el envio. La copia y el mensaje se guardan en la
@@ -37,20 +41,33 @@ prevista hasta el 31 de octubre. No es almacenamiento permanente ni un servicio
 de copia externo. Un borrado logico de historial no libera el presupuesto de
 copias, siguiendo la retencion fisica del historial ya existente.
 
-## Activacion
+## Activacion y verificacion
 
 Antes de activar, conservar fuera del servidor cualquier adjunto temporal que
 aun este disponible. El despliegue inicial de la correccion tambien reemplaza
 el disco anterior y no puede conservar archivos que aun no tienen copia.
 No se modifica el plan gratuito ni se contrata almacenamiento.
 
-Publicar los archivos revisados, incluida la migracion
-`0015_message_image_archive`, y desplegar esa revision. El arranque de Render
-aplica la migracion antes de escuchar. No requiere una APK nueva.
+La activacion se completo con autorizacion del usuario, que confirmo haber
+guardado los adjuntos necesarios. El arranque de Render aplica la migracion
+antes de escuchar. No requiere una APK nueva.
 
 Validacion local: 117 pruebas de fotos, GIF, permisos, historial y backend pasaron.
 La prueba de persistencia abre la foto desde una carpeta completamente nueva,
 compara cada byte y verifica que un tercero o un historial borrado no la restaure.
 Tambien se comprobaron limite total, fallo de base y ausencia de respaldo.
+
+La prueba real subio un PNG sintetico entre dos cuentas de prueba. Remitente y
+destinatario lo descargaron con HTTP 200 y el acceso anonimo sin ticket obtuvo
+401. Se reinicio el servicio y se confirmo el reemplazo de la instancia
+`srv-dbd00uon74is73fo9t10-pkv7r` por `srv-dbd00uon74is73fo9t10-nhqlf` antes de
+volver a descargar. El PNG conservo los mismos 101 bytes y SHA256
+`ab573e142c7934932fda75e5e9573c4e3ec6d6c7cc363e9bfa67f1dc3053563e`.
+Tambien abrio en el visor del chat web sin errores JavaScript.
+
+Los resultados sin credenciales estan en `.local/web-verification/`:
+`photo-persistence-upload.json`, `photo-persistence-verify.json` y
+`photo-persistence-browser.json`. Las credenciales sinteticas se guardan aparte
+y no se publican. La prueba no envio mensajes a cuentas de otras personas.
 
 Fuente: https://render.com/docs/free#local-files-lost-on-redeploy

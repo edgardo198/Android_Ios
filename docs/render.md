@@ -1,11 +1,40 @@
 # Prueba gratuita en Render: octubre de 2026
 
-Estado: configuracion local preparada; despliegue remoto pendiente de acceso valido
-y de publicar los cambios de ambos repositorios.
+Estado: **correccion de desconexiones desplegada y verificada el 24 de octubre de 2026**.
+
+Web y API: https://mensajeria-pruebas-octubre-2026.onrender.com
+
+Codigo publicado: https://github.com/edgardo198/Android_Ios/tree/render-pruebas-octubre-2026
+
+El despliegue activo se creo mediante la API de Render, con tres recursos en
+plan gratuito. `render.yaml` paso la validacion oficial y sirve como referencia
+de la arquitectura; no se creo una instancia de Blueprint.
+
+| Recurso | ID | Plan |
+| --- | --- | --- |
+| Web | `srv-dbd00uon74is73fo9t10` | Free |
+| PostgreSQL | `dpg-dbd00ugn74is73fo9s6g-a` | Free |
+| Redis | `red-dbd00umq1p3s73dg7a40` | Free |
+
+Render marco el despliegue `dep-dbd00vgn74is73fo9u8g` como `live`. Se verificaron
+la pagina principal, el bundle Expo, `/health/`, `robots.txt`, los estilos del
+administrador y el rechazo del acceso anonimo a `/chat/me/` y archivos privados.
+No se crearon cuentas ni se envio ningun mensaje durante esas comprobaciones.
+
+La correccion de acceso web quedo activa en la revision
+`12e7dcd9ac00f45d1f09132174d3778b2fb6ebbb`, despliegue
+`dep-dbd1jja9lscs738jso5g`, marcado `live` el 22 de octubre a las 14:14 UTC.
+Se completo registro e ingreso con una cuenta sintetica de pruebas. En la web
+actualizada se verifico el ingreso normal y otro con dos respuestas de salud
+503 simuladas y una respuesta correcta demorada 2,5 segundos: no se envio el
+formulario hasta estar listo y hubo exactamente un POST de ingreso.
+No se enviaron mensajes. Los resultados locales estan en
+`.local/web-verification/`; no contienen contrasenas ni tokens. La credencial de
+la cuenta de prueba se conserva por separado en `qa-account.json`, excluido de Git.
 
 ## Correccion de desconexiones del 24 de octubre
 
-Revision activa: `5c416412f2a3b09663edf846fcede42d5ddb0daa`, despliegue
+La correccion de Redis se activo en la revision `5c416412f2a3b09663edf846fcede42d5ddb0daa`, despliegue
 `dep-dbeb2c7avr4c73aart2g`, marcado `live` a las 13:24:22 UTC (07:24:22 en Honduras).
 
 Los registros mostraban `redis.exceptions.TimeoutError` en `BZPOPMIN` y cierres
@@ -28,6 +57,12 @@ conservo ambos sockets durante 26 segundos y recibio busqueda, lista de amigos
 y respuesta de presencia de llamadas. Los resultados sin credenciales estan en
 `.local/web-verification/redis-idle-results.json` y `native-idle-results.json`.
 No habia telefono conectado: la interaccion fisica en Android sigue pendiente.
+
+La revision activa desde las 07:39:20 del 24 de octubre es
+`919414cd1160682afff0c2a5cfb2c5a6ba9e66d6`, despliegue
+`dep-dbeb9c29lscs73aj2um0`. Agrega [copias privadas de fotos nuevas en PostgreSQL](fotos-render.md),
+con un presupuesto conjunto de 100 MiB. Una foto sintetica sobrevivio al reemplazo
+real de la instancia y se abrio desde ambas cuentas y desde el chat web.
 
 ## Periodo de prueba
 
@@ -56,15 +91,38 @@ La web y la API comparten el dominio HTTPS de Render. No hay que configurar CORS
 ni copiar una URL de API en la web. El APK instalado sigue usando su servidor
 anterior: para cambiarlo hay que compilarlo con `EXPO_PUBLIC_API_URL=https://<dominio-real>`.
 
+Metro compila con un trabajador y un limite de heap de 2048 MiB por proceso.
+La compilacion del 22 de octubre con paralelismo automatico supero los 8 GiB del
+constructor de Render; ese fallo no cambio la version que ya estaba disponible.
+
 El arranque aplica migraciones y recopila archivos estaticos antes de escuchar en
 el puerto 10000. Los adjuntos privados pasan por la autorizacion de Django; Nginx
 solo sirve directamente los avatares publicos y los archivos estaticos.
 
+## Acceso web cuando el servidor esta dormido
+
+Antes de ingresar o registrar una cuenta, la web comprueba `/health/` en su propio
+dominio HTTPS. En Render espera hasta 90 segundos, con intentos GET de hasta
+10 segundos; solo acepta JSON con `status: "ok"`. La comprobacion se comparte
+entre solicitudes y se renueva despues de un minuto sin actividad.
+
+Los datos del formulario se envian una sola vez, cuando el servidor esta listo.
+Si no responde dentro de ese plazo, aparece un mensaje para reintentar y se
+conservan los campos. No se buscan otros servidores ni se repite automaticamente
+el registro o el ingreso. Las pruebas unitarias de disponibilidad, autenticacion
+y API completaron 102 casos correctamente.
+
+Para cargar la actualizacion en la PC, abre la URL de Render y pulsa Ctrl+F5.
+Las cuentas creadas en el servidor local no se copiaron a esta base de pruebas.
+
 ## Limites del plan gratuito
 
 - PostgreSQL vence a los 30 dias. Guarda copias antes de su vencimiento.
-- Fotos, avatares y otros adjuntos se pierden al reiniciar, redesplegar o suspender
-  el servicio. No se migran los archivos ni usuarios locales automaticamente.
+- Las fotos nuevas del chat tienen copia privada en PostgreSQL (hasta 100 MiB
+  en total) desde la correccion del 24 de octubre. No recupera fotos anteriores
+  perdidas. Avatares, audio, video y documentos siguen en disco temporal y se
+  pierden al reiniciar, redesplegar o suspender. No se migran archivos ni usuarios
+  locales automaticamente. La copia de fotos dura mientras siga vigente la base.
 - El servicio duerme despues de 15 minutos sin trafico y puede tardar alrededor
   de un minuto en despertar. No garantiza recepcion continua de avisos.
 - Key Value gratuito no garantiza persistencia. PostgreSQL conserva los mensajes
@@ -80,18 +138,26 @@ Fuente: https://render.com/docs/free
 
 ## Publicar
 
-1. Publica primero los cambios del repositorio `App` en GitHub. `App` es un
-   submodulo; Render necesita que su commit exista en remoto.
-2. En el repositorio principal, actualiza el puntero de `App` y publica la version
-   revisada del backend, `render.yaml`, `Dockerfile.render`, `.dockerignore`,
-   `.gitattributes` y `scripts/render/`. Hay cambios locales previos: revisalos
-   antes de crear el commit; no subas secretos ni archivos personales.
-3. En https://dashboard.render.com/ abre **New > Blueprint** y conecta
-   `edgardo198/Android_Ios` con la rama que contiene esos cambios.
-4. Comprueba que todos los planes sean **Free** y aplica el Blueprint.
-5. Espera el build y abre la URL HTTPS que Render asigne. `/health/` debe devolver
-   `{"status":"ok"}`. Verifica registro, acceso, mensajes y WebSocket con dos cuentas.
-   Prueba adjuntos solo como datos temporales.
+La rama `render-pruebas-octubre-2026` contiene una copia seleccionada del codigo
+actual. Incluye `App` como una carpeta normal, por lo que este despliegue no
+depende de publicar el submodulo por separado. Los repositorios de trabajo
+originales y sus cambios pendientes se conservaron.
+
+Para actualizar la prueba, publica los cambios revisados en esa rama y ejecuta
+un despliegue manual desde el panel de Render o, en este equipo:
+
+```powershell
+powershell -NoProfile -File .\scripts\render-cli.ps1 deploys create srv-dbd00uon74is73fo9t10 --confirm
+```
+
+Los ayudantes de autenticacion y despliegue estan en el proyecto original de
+esta PC. La rama publicada contiene el codigo necesario para construir y
+ejecutar la aplicacion, sin sesiones locales ni archivos personales.
+
+Comprueba `/health/` despues de publicar. Para pruebas funcionales, registra dos
+cuentas nuevas y verifica mensajes y WebSocket entre ellas. Consulta los limites
+de fotos y otros adjuntos anteriores. El [APK Android 1.1.7 de pruebas](android-render.md) incluye la URL de
+Render y la espera de disponibilidad; se instalo en un Samsung Note 9.
 
 El nombre del servicio no garantiza un subdominio concreto. Django utiliza
 `RENDER_EXTERNAL_HOSTNAME`, proporcionado por Render, para permitir el dominio real.
