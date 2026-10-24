@@ -70,6 +70,15 @@ export function mediaCacheIdentity(source) {
   return path ? `${account || ''}:${resolveMediaUrl(path)}` : resolveMediaUrl(source);
 }
 
+export function mediaSourceError(error) {
+  const unavailable = error?.response?.status === 404 && error.response.data?.code === 'media_missing';
+  const explanation = unavailable ? 'Esta foto ya no está disponible. Pide que te la envíen de nuevo.'
+    : [401, 403].includes(error?.response?.status) ? 'No tienes acceso a este archivo.'
+      : error?.response?.status === 404 ? 'El archivo no está disponible.'
+        : error?.message || 'No se pudo abrir el archivo.';
+  return { error: explanation, unavailable };
+}
+
 export async function getMediaSource(source, { forceRefresh = false } = {}) {
   const path = privateMediaPath(source);
   if (!path) return resolveMediaUrl(source);

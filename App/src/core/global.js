@@ -1394,7 +1394,7 @@ const useGlobal = create((set, get) => ({
       const filename = typeof file?.fileName === 'string' ? file.fileName.trim() : '';
       if (!base64Data || !filename) {
         console.warn('WARNING: Payload Base64 invalido para miniatura.');
-        return;
+        return false;
       }
 
       socket.send(
@@ -1404,7 +1404,9 @@ const useGlobal = create((set, get) => ({
           filename,
         })
       );
+      return true;
     }
+    return false;
   },
 
   markFriendAsRead: (username, connectionId = null) => markFriendAsReadFn(set, get, username, connectionId),

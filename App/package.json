@@ -1,6 +1,6 @@
 {
   "name": "app",
-  "version": "1.1.5",
+  "version": "1.1.8",
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start --go --lan --port 8081",

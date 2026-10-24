@@ -32,6 +32,7 @@ from .services import (
     get_recipient,
     history_metadata,
     send_group,
+    save_avatar,
     send_push_notification,
     parse_positive_id,
     user_group_name,
@@ -596,10 +597,7 @@ class ChatConsumer(WebsocketConsumer):
         try:
             image_file = content_file_from_base64(data.get("base64"), data.get("filename"), media_type='image')
             validate_media_file(image_file, 'image')
-            user.miniatura.save(image_file.name, image_file, save=False)
-            # WebSocket scope may predate a private email/password update.
-            # Saving an avatar must not overwrite those account fields.
-            user.save(update_fields=['miniatura'])
+            save_avatar(user, image_file)
         except ChatServiceError as error:
             self._send_error(error.message)
             return

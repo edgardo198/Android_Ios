@@ -126,3 +126,11 @@ class MessageImageArchive(models.Model):
 class ImageArchiveBudget(models.Model):
     # A singleton row serializes uploads across conversations on PostgreSQL.
     id = models.PositiveSmallIntegerField(primary_key=True, default=1)
+
+
+class AvatarImageArchive(models.Model):
+    user = models.OneToOneField(Usuario, primary_key=True, on_delete=models.CASCADE,
+                               related_name='avatar_archive')
+    filename = models.CharField(max_length=100)
+    content = models.BinaryField(editable=False)
+    size = models.PositiveIntegerField()

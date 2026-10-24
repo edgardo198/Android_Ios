@@ -14,7 +14,7 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
-from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
+from rest_framework.exceptions import AuthenticationFailed, NotFound, PermissionDenied
 
 from .models import Message, Usuario
 from .image_archive import restore_image
@@ -60,7 +60,8 @@ def local_attachment_path(field):
         path = Path(field.storage.path(field.name)).resolve()
         path.relative_to(root)
         if not path.is_file() and not restore_image(field, path):
-            raise Http404
+            raise NotFound({'detail': 'Este archivo ya no está en el servidor. Pide que te lo envíen de nuevo.',
+                            'code': 'media_missing'})
         return path
     except (ValueError, OSError, NotImplementedError, SuspiciousFileOperation):
         raise Http404 from None

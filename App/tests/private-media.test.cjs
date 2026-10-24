@@ -344,3 +344,51 @@ test('private authorization failure exposes an error and refresh retries without
   assert.match(h.render().uri, /ticket=allowed/);
   h.unmount();
 });
+
+test('an image load failure refreshes its ticket once, then stops instead of looping', async () => {
+  const context = harness();
+  const h = sourceHookHarness(context, mediaPath);
+  h.render(); await flush();
+  const original = h.render().uri;
+  await h.render().onLoadError(original);
+  const recovered = h.render();
+  assert.notEqual(recovered.uri, original);
+  assert.equal(context.calls.length, 2);
+  await recovered.onLoadError(original); // A late old-image event must be ignored.
+  assert.equal(h.render().error, null);
+  await recovered.onLoadError(recovered.uri);
+  assert.equal(context.calls.length, 2);
+  assert.match(h.render().error, /conexión/);
+  await h.render().reload();
+  assert.equal(context.calls.length, 3);
+  assert.equal(h.render().error, null);
+  h.unmount();
+});
+
+test('an old account image failure cannot refresh with the next account credentials', async () => {
+  const context = harness();
+  const h = sourceHookHarness(context, mediaPath);
+  h.render(); await flush();
+  const previous = h.render();
+  context.setState({ user: { username: 'Bob' } });
+  h.render(false);
+  await previous.onLoadError(previous.uri);
+  assert.equal(context.calls.length, 1);
+  h.render(); await flush();
+  assert.match(h.render().uri, /ticket-Bob/);
+  h.unmount();
+});
+
+test('missing bytes are distinguished from permission errors and unrelated 404 responses', async () => {
+  const context = harness({ post: async () => {
+    throw Object.assign(new Error('Not found'), { response: { status: 404, data: { code: 'media_missing' } } });
+  } });
+  const h = sourceHookHarness(context, mediaPath);
+  h.render(); await flush();
+  assert.equal(h.render().uri, null);
+  assert.equal(h.render().unavailable, true);
+  assert.match(h.render().error, /envíen de nuevo/);
+  assert.equal(context.helpers.mediaSourceError({ response: { status: 403, data: { code: 'media_missing' } } }).unavailable, false);
+  assert.equal(context.helpers.mediaSourceError({ response: { status: 404 } }).unavailable, false);
+  h.unmount();
+});

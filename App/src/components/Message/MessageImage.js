@@ -13,7 +13,11 @@ const MessageImage = memo(({ message = {} }) => {
   const media = usePrivateMediaSource(message.image);
   const imageUri = media.uri;
   const isGif = isGifImage(message.filename);
-  const [loaded, setLoaded] = useState(false);
+  const imageKey = `${imageUri}:${media.version}`;
+  const imageKeyRef = useRef(imageKey);
+  imageKeyRef.current = imageKey;
+  const [loadedKey, setLoadedKey] = useState(null);
+  const loaded = !!imageUri && loadedKey === imageKey;
   const [saving, setSaving] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
@@ -23,7 +27,6 @@ const MessageImage = memo(({ message = {} }) => {
   const savingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => {
-    setLoaded(false);
     setHasError(false);
     setIsVisible(false);
     setViewerUri(null);
@@ -75,15 +78,19 @@ const MessageImage = memo(({ message = {} }) => {
         >
           {imageUri && (
             <ExpoImage
-              key={`${imageUri}:${media.version}`}
+              key={imageKey}
               style={styles.image}
               source={{ uri: imageUri, ...(isGif ? { isAnimated: true } : {}) }}
               contentFit="cover"
               autoplay
               cachePolicy={media.isPrivate ? 'none' : 'memory-disk'}
               transition={150}
-              onLoad={() => setLoaded(true)}
-              onError={() => { setHasError(true); setLoaded(true); }}
+              onLoad={() => { if (imageKeyRef.current === imageKey) setLoadedKey(imageKey); }}
+              onError={() => {
+                if (imageKeyRef.current !== imageKey) return;
+                setLoadedKey(imageKey);
+                void media.onLoadError(imageUri);
+              }}
             />
           )}
         </TouchableOpacity>
@@ -91,9 +98,9 @@ const MessageImage = memo(({ message = {} }) => {
         {(hasError || media.error) && (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText} accessibilityRole="alert">{media.error || 'No se pudo cargar la imagen.'}</Text>
-            <TouchableOpacity style={styles.retry} onPress={() => media.reload()} disabled={media.loading} accessibilityRole="button" accessibilityLabel="Reintentar imagen">
+            {!media.unavailable && <TouchableOpacity style={styles.retry} onPress={() => media.reload()} disabled={media.loading} accessibilityRole="button" accessibilityLabel="Reintentar imagen">
               <Text style={styles.retryText}>Reintentar</Text>
-            </TouchableOpacity>
+            </TouchableOpacity>}
           </View>
         )}
         {loaded && !hasError && (

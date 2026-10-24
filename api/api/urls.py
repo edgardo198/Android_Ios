@@ -26,8 +26,8 @@ def health(_request):
 
 
 def public_avatar(_request, filename):
-    # Only avatars stay public. Never route the entire MEDIA_ROOT in DEBUG.
-    if not settings.DEBUG:
+    # Only avatars stay public; recovery must also run behind production Nginx.
+    if Path(filename).name != filename:
         raise Http404
     raw_root = Path(settings.MEDIA_ROOT).resolve() / 'miniatura'
     root = raw_root.resolve()
@@ -37,8 +37,16 @@ def public_avatar(_request, filename):
         target = (root / filename).resolve()
         target.relative_to(root)
         if not target.is_file():
-            raise Http404
-        return FileResponse(target.open('rb'))
+            from chat.image_archive import restore_avatar
+            if not restore_avatar('miniatura/' + filename, target):
+                raise Http404
+        from chat.media_access import attachment_chunks
+        handle = target.open('rb')
+        response = FileResponse(handle)
+        response.streaming_content = attachment_chunks(handle)
+        response['Cache-Control'] = 'no-cache'
+        response['X-Content-Type-Options'] = 'nosniff'
+        return response
     except (ValueError, OSError):
         raise Http404 from None
 

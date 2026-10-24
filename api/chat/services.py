@@ -15,8 +15,8 @@ from django.db.models import Max
 from django.forms import ImageField
 from django.utils import timezone
 
-from .models import Connection, Message
-from .image_archive import ImageArchiveFull, archive_image
+from .models import Connection, Message, Usuario
+from .image_archive import ImageArchiveFull, archive_avatar, archive_image
 from .serializers import MessageSerializer, UsuarioSerializer
 
 
@@ -27,6 +27,26 @@ class ChatServiceError(Exception):
         self.status_code = status_code
         self.code = code
         self.details = details or {}
+
+
+def save_avatar(user, image_file):
+    """Save avatar and durable copy together using the latest account row."""
+    saved_name = None
+    storage = user.miniatura.storage
+    try:
+        with transaction.atomic():
+            current = Usuario.objects.select_for_update().get(pk=user.pk, is_active=True)
+            current.miniatura.save(image_file.name, image_file, save=False)
+            saved_name = current.miniatura.name
+            current.save(update_fields=['miniatura'])
+            archive_avatar(current)
+        user.miniatura = saved_name
+    except Exception as error:
+        if saved_name:
+            storage.delete(saved_name)
+        if isinstance(error, ImageArchiveFull):
+            raise ChatServiceError(str(error), status_code=413) from error
+        raise ChatServiceError('No se pudo guardar la foto de perfil.') from error
 
 
 SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._ -]+")

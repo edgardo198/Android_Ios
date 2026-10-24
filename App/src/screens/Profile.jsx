@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Modal, Alert, Platform, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Modal, Platform, ScrollView, StyleSheet } from 'react-native';
 import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
 import { faPen, faSignOutAlt, faCamera, faImages, faChevronRight, faChevronUp, faChevronDown } from '@fortawesome/free-solid-svg-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,9 +20,11 @@ function ProfileImage() {
   const user = useGlobal((state) => state.user);
   const [isModalVisible, setModalVisible] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
   const busyRef = useRef(false);
   const pendingCameraRef = useRef(null);
   const socketConnected = useGlobal((state) => state.socketConnected);
+  const reportPhotoError = (message) => setPhotoError(message);
 
   const closeAndPick = (fromCamera) => {
     if (Platform.OS === 'ios') {
@@ -37,26 +39,21 @@ function ProfileImage() {
     if (busyRef.current) return;
     busyRef.current = true;
     setIsBusy(true);
+    setPhotoError('');
     setModalVisible(false);
     try {
       if (!socketConnected) {
-        Alert.alert('Sin conexión', 'Espera a que se restablezca la conexión para cambiar tu foto.');
+        reportPhotoError('Espera a que se restablezca la conexión para cambiar tu foto.');
         return;
       }
       if (fromCamera && Platform.OS === 'web') {
-        Alert.alert(
-          'No disponible en navegador',
-          'La captura directa con camara sigue pensada para la app movil.'
-        );
+        reportPhotoError('Selecciona un archivo para cambiar tu foto desde el navegador.');
         return;
       }
 
       const permissionResult = fromCamera ? await ImagePicker.requestCameraPermissionsAsync() : null;
       if (permissionResult && !permissionResult.granted) {
-        Alert.alert(
-          'Permiso requerido',
-          `Se necesita permiso para acceder a tu ${fromCamera ? 'camara' : 'galeria de fotos'}.`
-        );
+        reportPhotoError(`Se necesita permiso para acceder a tu ${fromCamera ? 'cámara' : 'galería de fotos'}.`);
         return;
       }
 
@@ -82,14 +79,14 @@ function ProfileImage() {
           const thumbnail = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
           if (!thumbnail.base64) throw new Error('No se pudo leer la imagen.');
           const sent = await uploadMiniatura({ base64: thumbnail.base64, fileName: `perfil-${Date.now()}.jpg` });
-          if (sent === false) Alert.alert('Sin conexión', 'No se pudo enviar la foto. Intenta nuevamente.');
+          if (sent === false) reportPhotoError('No se pudo enviar la foto. Espera a que conecte e intenta nuevamente.');
         } finally {
           image?.release();
           context.release();
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo procesar la imagen. Por favor, intenta de nuevo.');
+      reportPhotoError(error.message || 'No se pudo procesar la imagen. Intenta de nuevo.');
     } finally {
       busyRef.current = false;
       setIsBusy(false);
@@ -99,18 +96,19 @@ function ProfileImage() {
 
   return (
     <View style={profileStyles.photoContainer}>
-      <TouchableOpacity onPress={() => setModalVisible(true)} disabled={isBusy}
+      <TouchableOpacity onPress={() => { setPhotoError(''); setModalVisible(true); }} disabled={isBusy || !socketConnected}
         accessibilityRole="button" accessibilityLabel="Cambiar foto de perfil"
         accessibilityHint={Platform.OS === 'web' ? 'Elige una imagen de tus archivos.' : 'Elige una foto de la galería o usa la cámara.'}
-        accessibilityState={{ disabled: isBusy, busy: isBusy }}>
+        accessibilityState={{ disabled: isBusy || !socketConnected, busy: isBusy }}>
         <View style={profileStyles.photo}>
           <Miniatura url={user?.miniatura} size={76} />
           <View style={profileStyles.editPhoto}>
             <FontAwesomeIcon icon={faPen} size={11} color="#ffffff" />
           </View>
         </View>
-        <Text style={profileStyles.photoCaption}>{isBusy ? 'Actualizando...' : 'Cambiar foto'}</Text>
+        <Text style={profileStyles.photoCaption}>{isBusy ? 'Actualizando...' : !socketConnected ? 'Conectando...' : 'Cambiar foto'}</Text>
       </TouchableOpacity>
+      {!!photoError && <Text style={styles.authError} accessibilityRole="alert" accessibilityLiveRegion="polite">{photoError}</Text>}
       <Modal
         transparent
         animationType="fade"
