@@ -111,3 +111,18 @@ class Message(models.Model):
 
     def __str__(self):
         return f"{self.user.username}: {self.text or 'Imagen/Audio'}"
+
+
+class MessageImageArchive(models.Model):
+    """Trial-sized durable copy; never included in message serialization."""
+
+    message = models.OneToOneField(Message, primary_key=True, on_delete=models.CASCADE,
+                                  related_name='image_archive')
+    filename = models.CharField(max_length=100)
+    content = models.BinaryField(editable=False)
+    size = models.PositiveIntegerField()
+
+
+class ImageArchiveBudget(models.Model):
+    # A singleton row serializes uploads across conversations on PostgreSQL.
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1)

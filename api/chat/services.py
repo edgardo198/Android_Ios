@@ -16,6 +16,7 @@ from django.forms import ImageField
 from django.utils import timezone
 
 from .models import Connection, Message
+from .image_archive import ImageArchiveFull, archive_image
 from .serializers import MessageSerializer, UsuarioSerializer
 
 
@@ -377,6 +378,12 @@ def create_media_message_from_file(user, connection, file_obj, media_type, *, br
             )
             getattr(message, config["field"]).save(filename, file_obj, save=False)
             message.save()
+            if media_type == 'image':
+                archive_image(message)
+    except ImageArchiveFull as error:
+        if message is not None and message.image and message.image._committed:
+            message.image.delete(save=False)
+        raise ChatServiceError(str(error), status_code=413) from error
     except ChatServiceError:
         raise
     except Exception as error:

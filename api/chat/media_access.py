@@ -17,6 +17,7 @@ from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
 from .models import Message, Usuario
+from .image_archive import restore_image
 
 MEDIA_KINDS = ('image', 'audio', 'video', 'document')
 TICKET_SALT = 'chat.private-media.v1'
@@ -58,7 +59,7 @@ def local_attachment_path(field):
         root = Path(getattr(field.storage, 'location', settings.MEDIA_ROOT)).resolve()
         path = Path(field.storage.path(field.name)).resolve()
         path.relative_to(root)
-        if not path.is_file():
+        if not path.is_file() and not restore_image(field, path):
             raise Http404
         return path
     except (ValueError, OSError, NotImplementedError, SuspiciousFileOperation):

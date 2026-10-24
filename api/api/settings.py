@@ -270,6 +270,10 @@ CHAT_MEDIA_MAX_BYTES = {
     'document': positive_env_int('CHAT_DOCUMENT_MAX_BYTES', 25 * 1024 * 1024),
 }
 CHAT_MEDIA_ACCESS_TTL_SECONDS = min(positive_env_int('CHAT_MEDIA_ACCESS_TTL_SECONDS', 900), 900)
+# Preserve trial photos in PostgreSQL; local media remains the download cache.
+# Free Render Postgres still expires: this is not permanent object storage.
+CHAT_ARCHIVE_IMAGES = env_bool('CHAT_ARCHIVE_IMAGES', bool(render_hostname))
+CHAT_IMAGE_ARCHIVE_MAX_BYTES = positive_env_int('CHAT_IMAGE_ARCHIVE_MAX_BYTES', 100 * 1024 * 1024)
 
 # Recovery is deliberately unavailable until a fixed frontend URL and a sender
 # are configured. Console delivery is an explicit, development-only choice.
