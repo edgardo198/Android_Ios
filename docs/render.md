@@ -3,6 +3,32 @@
 Estado: configuracion local preparada; despliegue remoto pendiente de acceso valido
 y de publicar los cambios de ambos repositorios.
 
+## Correccion de desconexiones del 24 de octubre
+
+Revision activa: `5c416412f2a3b09663edf846fcede42d5ddb0daa`, despliegue
+`dep-dbeb2c7avr4c73aart2g`, marcado `live` a las 13:24:22 UTC (07:24:22 en Honduras).
+
+Los registros mostraban `redis.exceptions.TimeoutError` en `BZPOPMIN` y cierres
+repetidos de `/ws/chat/` y `/ws/calls/`. No era prueba de una caida de Redis:
+redis-py 8.1 fija por defecto cinco segundos de lectura, el mismo plazo que
+Channels usa para su lectura bloqueante. Se configuro explicitamente un limite
+de lectura de 20 segundos y de conexion de cinco segundos en la capa Channels.
+El cache HTTP conserva su configuracion independiente.
+
+La correccion es del servidor compartido por web y APK Render 1.1.7; no requiere
+reinstalar ni borrar datos del telefono. Recarga la web y vuelve a abrir la app
+para recuperar sus conexiones. No cambia los limites del plan gratuito.
+
+Validacion: una prueba con el cliente Redis real y un servidor RESP controlado
+demora la respuesta 5,25 segundos y comprueba que el siguiente evento llega por
+la misma conexion. Pasaron 116 pruebas de cliente de chat, llamadas y cola.
+En Render se verificaron ingreso y navegacion web tras inactividad, sin errores
+JavaScript ni cierre de sockets. Otra prueba sin encabezado Origin, como Android,
+conservo ambos sockets durante 26 segundos y recibio busqueda, lista de amigos
+y respuesta de presencia de llamadas. Los resultados sin credenciales estan en
+`.local/web-verification/redis-idle-results.json` y `native-idle-results.json`.
+No habia telefono conectado: la interaccion fisica en Android sigue pendiente.
+
 ## Periodo de prueba
 
 Esta configuracion se usara solo para pruebas durante lo que resta de octubre
