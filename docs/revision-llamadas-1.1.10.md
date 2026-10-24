@@ -30,8 +30,10 @@ UDP de relay elegido en coturn y su firewall. No usar una dirección de ejemplo
 como configuración activa. Ver `docs/llamadas.md`, sección STUN/TURN.
 
 Falta comprobar dos dispositivos físicos en redes distintas y probar un cambio
-Wi-Fi/datos. El 24 de octubre el Note 9 no apareció conectado mediante ADB durante
-esta revisión. El APK nuevo no se considera instalado hasta comprobarlo.
+Wi-Fi/datos. El Note 9 volvió a conectarse durante la revisión; se instaló
+1.1.10, código 12, mediante `adb install -r` conservando datos. Se confirmó la
+versión instalada y los permisos concedidos de cámara y micrófono. Eso no
+equivale a una llamada física entre dos redes.
 
 Referencias: https://webrtc.org/getting-started/turn-server y
 https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf.
