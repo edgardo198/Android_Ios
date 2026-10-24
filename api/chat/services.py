@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -29,13 +30,15 @@ class ChatServiceError(Exception):
         self.details = details or {}
 
 
-def save_avatar(user, image_file):
+def save_avatar(user, image_file, *, expected_auth_version=None):
     """Save avatar and durable copy together using the latest account row."""
     saved_name = None
     storage = user.miniatura.storage
     try:
         with transaction.atomic():
             current = Usuario.objects.select_for_update().get(pk=user.pk, is_active=True)
+            if expected_auth_version is not None and current.auth_version != expected_auth_version:
+                raise ChatServiceError('La sesión venció. Inicia sesión nuevamente.', status_code=401)
             current.miniatura.save(image_file.name, image_file, save=False)
             saved_name = current.miniatura.name
             current.save(update_fields=['miniatura'])
@@ -44,6 +47,8 @@ def save_avatar(user, image_file):
     except Exception as error:
         if saved_name:
             storage.delete(saved_name)
+        if isinstance(error, ChatServiceError):
+            raise
         if isinstance(error, ImageArchiveFull):
             raise ChatServiceError(str(error), status_code=413) from error
         raise ChatServiceError('No se pudo guardar la foto de perfil.') from error
@@ -258,19 +263,22 @@ def build_message_payload(message, current_user, friend):
     }
 
 
-def send_group(group, source, data):
+def send_group(group, source, data, *, timeout=None):
     channel_layer = get_channel_layer()
     if channel_layer is None:
         return
 
-    async_to_sync(channel_layer.group_send)(
-        user_group_name(group),
-        {
+    event = {
             "type": "broadcast_group",
             "source": source,
             "data": data,
-        },
-    )
+        }
+    if timeout is None:
+        async_to_sync(channel_layer.group_send)(user_group_name(group), event)
+    else:
+        async def bounded_send():
+            await asyncio.wait_for(channel_layer.group_send(user_group_name(group), event), timeout)
+        async_to_sync(bounded_send)()
 
 
 def send_push_notification(push_token, title, message):

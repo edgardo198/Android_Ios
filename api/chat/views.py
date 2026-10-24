@@ -14,7 +14,7 @@ from .typing import notify_live_typing_settings
 from .authentication import token_auth_version
 from .media_access import authorized_attachment, attachment_response, create_access_ticket, download_user, private_headers
 from .serializers import (ActiveTokenRefreshSerializer, CurrentUsuarioSerializer, PasswordResetConfirmSerializer,
-                          PasswordResetRequestSerializer, PushTokenSerializer, SignUpSerializer)
+                          PasswordResetRequestSerializer, PushTokenSerializer, SignUpSerializer, UsuarioSerializer)
 from .password_reset import (CONFIRM_DETAIL, INVALID_DETAIL, REQUEST_DETAIL, UNAVAILABLE_DETAIL,
                              confirm_allowed, queue_password_reset, recovery_configuration_ready,
                              request_allowed, reset_password)
@@ -24,11 +24,38 @@ from .services import (
     clear_connection_history,
     create_media_message_from_file,
     get_connection_for_user,
+    save_avatar,
+    send_group,
+    validate_media_file,
 )
 
 
 def normalize_credential(value):
     return value.strip() if isinstance(value, str) else ''
+
+
+class AvatarUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        photo = request.FILES.get('file')
+        if photo is None:
+            return Response({'detail': 'Selecciona una foto.'}, status=400)
+        try:
+            validate_media_file(photo, 'image')
+            save_avatar(request.user, photo, expected_auth_version=request.user.auth_version)
+        except ChatServiceError as error:
+            return Response({'detail': error.message}, status=error.status_code)
+        try:
+            send_group(request.user.username, 'miniatura', UsuarioSerializer(request.user).data, timeout=1)
+        except Exception:
+            # The durable upload is already committed; websocket delivery is optional.
+            pass
+        return Response({'user': CurrentUsuarioSerializer(request.user).data})
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        return private_headers(super().finalize_response(request, response, *args, **kwargs))
 
 
 def get_auth_for_user(user):

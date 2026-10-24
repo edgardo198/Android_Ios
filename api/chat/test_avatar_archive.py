@@ -1,4 +1,7 @@
 import tempfile
+import asyncio
+import time
+from types import SimpleNamespace
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -105,3 +108,53 @@ class AvatarArchiveTests(TestCase):
         self.assertEqual(response.data['code'], 'media_missing')
         client.force_authenticate(user=Usuario.objects.create_user(username='avatar_stranger'))
         self.assertEqual(client.post(url).status_code, 403)
+
+    def test_http_avatar_upload_succeeds_and_confirms_when_redis_is_unavailable(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        with patch('chat.views.send_group', side_effect=ConnectionError('Redis offline')):
+            response = client.post('/chat/me/avatar/', {'file': self.photo()}, format='multipart')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['user']['username'], self.user.username)
+        self.assertTrue(response.data['user']['miniatura'])
+        self.assertEqual(bytes(AvatarImageArchive.objects.get().content), self.raw)
+        self.assertEqual(response['Cache-Control'], 'private, no-store')
+
+    def test_http_avatar_upload_requires_authentication_and_always_updates_its_owner(self):
+        client = APIClient()
+        self.assertEqual(client.post('/chat/me/avatar/', {'file': self.photo()}, format='multipart').status_code, 401)
+        client.force_authenticate(user=self.user)
+        response = client.post('/chat/me/avatar/', {'file': self.photo(), 'username': self.other.username}, format='multipart')
+        self.assertEqual(response.status_code, 200)
+        self.other.refresh_from_db()
+        self.assertFalse(self.other.miniatura)
+
+    def test_http_avatar_upload_reports_missing_invalid_and_oversized_files(self):
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        self.assertEqual(client.post('/chat/me/avatar/', {}, format='multipart').status_code, 400)
+        invalid = SimpleUploadedFile('bad.png', b'not an image', content_type='image/png')
+        self.assertEqual(client.post('/chat/me/avatar/', {'file': invalid}, format='multipart').status_code, 400)
+        limits = {'image': len(self.raw) - 1}
+        with override_settings(CHAT_MEDIA_MAX_BYTES=limits):
+            self.assertEqual(client.post('/chat/me/avatar/', {'file': self.photo()}, format='multipart').status_code, 413)
+        self.assertFalse(AvatarImageArchive.objects.exists())
+
+    def test_password_reset_during_avatar_upload_cannot_change_the_profile(self):
+        Usuario.objects.filter(pk=self.user.pk).update(auth_version=1)
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        self.assertEqual(client.post('/chat/me/avatar/', {'file': self.photo()}, format='multipart').status_code, 401)
+        self.assertFalse(AvatarImageArchive.objects.exists())
+
+    def test_slow_redis_cannot_hold_the_confirmed_http_upload_indefinitely(self):
+        async def stalled_send(*args):
+            await asyncio.sleep(30)
+        client = APIClient()
+        client.force_authenticate(user=self.user)
+        started = time.monotonic()
+        with patch('chat.services.get_channel_layer', return_value=SimpleNamespace(group_send=stalled_send)):
+            response = client.post('/chat/me/avatar/', {'file': self.photo()}, format='multipart')
+        self.assertEqual(response.status_code, 200)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertTrue(AvatarImageArchive.objects.exists())

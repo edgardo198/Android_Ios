@@ -14,17 +14,18 @@ import { normalizeRecoveryEmail, recoveryEmailError } from '../common/passwordRe
 import TypingAnimationSettings from '../components/Message/TypingAnimationSettings';
 import LiveTypingSettings from '../components/Message/LiveTypingSettings';
 import BackgroundNoticeSettings from '../notifications/BackgroundNoticeSettings';
+import { appendUploadFile } from '../components/Message/mediaFiles';
 
-function ProfileImage() {
+function ProfileImage({ onPhotoError }) {
   const uploadMiniatura = useGlobal((state) => state.uploadMiniatura);
   const user = useGlobal((state) => state.user);
   const [isModalVisible, setModalVisible] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
-  const [photoError, setPhotoError] = useState('');
   const busyRef = useRef(false);
   const pendingCameraRef = useRef(null);
-  const socketConnected = useGlobal((state) => state.socketConnected);
-  const reportPhotoError = (message) => setPhotoError(message);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const reportPhotoError = (message) => { if (mounted.current) onPhotoError?.(message); };
 
   const closeAndPick = (fromCamera) => {
     if (Platform.OS === 'ios') {
@@ -37,15 +38,14 @@ function ProfileImage() {
 
   const pickImage = async (fromCamera = false) => {
     if (busyRef.current) return;
+    const session = useGlobal.getState().captureAuthSession();
+    const current = () => mounted.current && useGlobal.getState().isAuthSessionCurrent(session);
     busyRef.current = true;
     setIsBusy(true);
-    setPhotoError('');
+    reportPhotoError('');
     setModalVisible(false);
     try {
-      if (!socketConnected) {
-        reportPhotoError('Espera a que se restablezca la conexión para cambiar tu foto.');
-        return;
-      }
+      if (!current()) return;
       if (fromCamera && Platform.OS === 'web') {
         reportPhotoError('Selecciona un archivo para cambiar tu foto desde el navegador.');
         return;
@@ -70,45 +70,47 @@ function ProfileImage() {
             quality: 1,
           });
 
+      if (!current()) return;
       if (!result.canceled && result.assets?.[0]) {
         const context = ImageManipulator.manipulate(result.assets[0].uri);
         let image;
         try {
           context.resize({ width: 512 });
           image = await context.renderAsync();
-          const thumbnail = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8, base64: true });
-          if (!thumbnail.base64) throw new Error('No se pudo leer la imagen.');
-          const sent = await uploadMiniatura({ base64: thumbnail.base64, fileName: `perfil-${Date.now()}.jpg` });
-          if (sent === false) reportPhotoError('No se pudo enviar la foto. Espera a que conecte e intenta nuevamente.');
+          const thumbnail = await image.saveAsync({ format: SaveFormat.JPEG, compress: 0.8 });
+          if (!current()) return;
+          const formData = new FormData();
+          await appendUploadFile(formData, { uri: thumbnail.uri }, `perfil-${Date.now()}.jpg`, 'image/jpeg');
+          if (!current()) return;
+          await uploadMiniatura(formData);
         } finally {
           image?.release();
           context.release();
         }
       }
     } catch (error) {
-      reportPhotoError(error.message || 'No se pudo procesar la imagen. Intenta de nuevo.');
+      if (current()) reportPhotoError(normalizeApiError(error.response?.data,
+        error.message || 'No se pudo procesar la imagen. Intenta de nuevo.'));
     } finally {
       busyRef.current = false;
-      setIsBusy(false);
-      setModalVisible(false);
+      if (mounted.current) { setIsBusy(false); setModalVisible(false); }
     }
   };
 
   return (
     <View style={profileStyles.photoContainer}>
-      <TouchableOpacity onPress={() => { setPhotoError(''); setModalVisible(true); }} disabled={isBusy || !socketConnected}
+      <TouchableOpacity onPress={() => { reportPhotoError(''); setModalVisible(true); }} disabled={isBusy}
         accessibilityRole="button" accessibilityLabel="Cambiar foto de perfil"
         accessibilityHint={Platform.OS === 'web' ? 'Elige una imagen de tus archivos.' : 'Elige una foto de la galería o usa la cámara.'}
-        accessibilityState={{ disabled: isBusy || !socketConnected, busy: isBusy }}>
+        accessibilityState={{ disabled: isBusy, busy: isBusy }}>
         <View style={profileStyles.photo}>
           <Miniatura url={user?.miniatura} size={76} />
           <View style={profileStyles.editPhoto}>
             <FontAwesomeIcon icon={faPen} size={11} color="#ffffff" />
           </View>
         </View>
-        <Text style={profileStyles.photoCaption}>{isBusy ? 'Actualizando...' : !socketConnected ? 'Conectando...' : 'Cambiar foto'}</Text>
+        <Text style={profileStyles.photoCaption}>{isBusy ? 'Actualizando...' : 'Cambiar foto'}</Text>
       </TouchableOpacity>
-      {!!photoError && <Text style={styles.authError} accessibilityRole="alert" accessibilityLiveRegion="polite">{photoError}</Text>}
       <Modal
         transparent
         animationType="fade"
@@ -261,6 +263,7 @@ export function ProfileEmail({ navigation }) {
 
 function ProfileScreen({ navigation }) {
   const user = useGlobal((state) => state.user);
+  const [photoError, setPhotoError] = useState('');
 
   return (
     <ScrollView style={profileStyles.page} contentContainerStyle={profileStyles.content} keyboardShouldPersistTaps="handled">
@@ -268,12 +271,13 @@ function ProfileScreen({ navigation }) {
         <View style={profileStyles.card}>
           <Text style={profileStyles.sectionTitle} accessibilityRole="header">Cuenta</Text>
           <View style={profileStyles.accountRow}>
-            <ProfileImage />
+            <ProfileImage onPhotoError={setPhotoError} />
             <View style={profileStyles.accountDetails}>
               <Text style={[profileStyles.name, profileStyles.wrappingText]}>{user?.name || 'Usuario'}</Text>
               <Text style={[profileStyles.username, profileStyles.wrappingText]}>{user?.username || 'Sin nombre de usuario'}</Text>
             </View>
           </View>
+          {!!photoError && <Text style={styles.authError} accessibilityRole="alert" accessibilityLiveRegion="polite">{photoError}</Text>}
         </View>
         <View style={profileStyles.card}>
           <Text style={profileStyles.sectionTitle} accessibilityRole="header">Seguridad</Text>

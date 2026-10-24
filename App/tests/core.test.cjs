@@ -99,6 +99,7 @@ function coreHarness(options = {}) {
     './api': {
       __esModule: true,
       default: { get: options.getProfile || (async () => ({ data: { user: { username: 'me' } } })),
+        post: options.uploadAvatar || (async () => { throw new Error('Unexpected POST'); }),
         patch: options.patchProfile || (async () => { throw new Error('Unexpected PATCH'); }),
         delete: options.deleteConversation || (async () => { throw new Error('Unexpected DELETE'); }) },
       getAccessToken: options.getAccessToken || (async () => (await secure.get('tokens'))?.access),
@@ -129,6 +130,33 @@ async function connectedHarness(options) {
   ]);
   return { ...harness, socket };
 }
+
+test('profile photo upload uses authenticated HTTP and confirms without a chat socket', async () => {
+  const selected = { selected: 'photo-form-data' };
+  const h = coreHarness({ uploadAvatar: async (url, body) => {
+    assert.equal(url, '/chat/me/avatar/');
+    assert.equal(body, selected);
+    return { data: { user: { username: 'me', miniatura: '/media/miniatura/new.jpg' } } };
+  } });
+  await h.store.getState().login({ username: 'me' }, { username: 'me' }, { access: 'access', refresh: 'refresh' });
+  assert.equal(h.sockets.length, 0);
+  assert.equal(await h.store.getState().uploadMiniatura(selected), true);
+  assert.equal(h.store.getState().user.miniatura, '/media/miniatura/new.jpg');
+});
+
+test('a profile photo response after logout cannot restore the old account', async () => {
+  let resolve;
+  const pending = new Promise(done => { resolve = done; });
+  const h = coreHarness({ uploadAvatar: () => pending });
+  await h.store.getState().login({ username: 'me' }, { username: 'me' }, { access: 'access', refresh: 'refresh' });
+  const upload = h.store.getState().uploadMiniatura({ selected: 'photo' });
+  await h.store.getState().logout();
+  resolve({ data: { user: { username: 'me', miniatura: '/media/miniatura/stale.jpg' } } });
+  await assert.rejects(upload, error => error.code === 'SESSION_CHANGED');
+  assert.equal(h.store.getState().authenticated, false);
+  assert.equal(h.store.getState().user?.miniatura, undefined);
+  assert.equal(h.store.getState().user?.username, undefined);
+});
 
 function message(id, text = 'hello', isMe = false) {
   const created = new Date(Date.UTC(2026, 9, 6, 12) + Number(id) * 1000).toISOString();

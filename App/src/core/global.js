@@ -1387,26 +1387,16 @@ const useGlobal = create((set, get) => ({
     }
   },
 
-  uploadMiniatura: (file) => {
-    const socket = get().socket;
-    if (socket?.readyState === WebSocket.OPEN) {
-      const base64Data = normalizeBase64Payload(file?.base64);
-      const filename = typeof file?.fileName === 'string' ? file.fileName.trim() : '';
-      if (!base64Data || !filename) {
-        console.warn('WARNING: Payload Base64 invalido para miniatura.');
-        return false;
-      }
-
-      socket.send(
-        JSON.stringify({
-          source: 'miniatura',
-          base64: base64Data,
-          filename,
-        })
-      );
-      return true;
+  uploadMiniatura: async (formData) => {
+    const snapshot = get().captureAuthSession();
+    if (!get().isAuthSessionCurrent(snapshot)) throw authSessionChanged();
+    const response = await api.post('/chat/me/avatar/', formData, { timeout: 60000 });
+    if (!get().isAuthSessionCurrent(snapshot)) throw authSessionChanged();
+    if (response?.data?.user?.username !== snapshot.username || !response.data.user.miniatura) {
+      throw new Error('El servidor no confirmó la foto de perfil.');
     }
-    return false;
+    responseMiniatura(set, get, response.data.user);
+    return true;
   },
 
   markFriendAsRead: (username, connectionId = null) => markFriendAsReadFn(set, get, username, connectionId),
