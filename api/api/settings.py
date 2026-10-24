@@ -77,7 +77,11 @@ if redis_url:
         'default': {
             'BACKEND': 'channels_redis.core.RedisChannelLayer',
             'CONFIG': {
-                'hosts': [redis_url],
+                # redis-py 8 defaults to a 5s socket timeout, which races
+                # Channels' 5s blocking BZPOPMIN when a socket is idle.
+                # Keep a finite network bound with room for the blocking read.
+                'hosts': [{'address': redis_url, 'socket_timeout': 20,
+                           'socket_connect_timeout': 5}],
             },
         },
     }
